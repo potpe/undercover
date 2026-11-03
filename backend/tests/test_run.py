@@ -3,7 +3,7 @@ import inspect
 from agent.main import run
 from backend import main
 from backend.models import DecisionRequest, PaymentRequest
-from backend.workflow import record_decision, record_payment
+from backend.workflow import record_decision, record_payment, start_run
 
 
 def test_agent_instructions_are_served_read_only(client):
@@ -50,13 +50,11 @@ def test_run_endpoint_executes_the_agent(client, monkeypatch):
     )
 
 
-def test_duplicate_run_is_rejected_while_in_progress(client, monkeypatch):
-    monkeypatch.setattr(main, "agent_run", lambda claim_id, thread_id: "Done")
+def test_duplicate_run_is_rejected_while_in_progress(client):
+    start_run("CLM-1001")
 
-    first = client.post("/api/claims/CLM-1001/run", json={"thread_id": "one"})
     second = client.post("/api/claims/CLM-1001/run", json={"thread_id": "two"})
 
-    assert first.status_code == 202
     assert second.status_code == 409
     assert second.json() == {"detail": "Claim is not waiting to run"}
 
@@ -74,6 +72,20 @@ def test_failed_run_returns_an_undecided_claim_to_waiting(client, monkeypatch):
     assert bundle["claim"]["status"] == "waiting"
     assert bundle["decision"] is None
     assert bundle["activity"][-1]["message"] == "Agent run failed: Model unavailable"
+
+
+def test_run_without_a_decision_returns_the_claim_to_waiting(client, monkeypatch):
+    monkeypatch.setattr(main, "agent_run", lambda claim_id, thread_id: "No decision")
+
+    response = client.post("/api/claims/CLM-1001/run", json={"thread_id": "one"})
+
+    assert response.status_code == 202
+    bundle = client.get("/api/claims/CLM-1001").json()
+    assert bundle["claim"]["status"] == "waiting"
+    assert bundle["decision"] is None
+    assert bundle["activity"][-1]["message"] == (
+        "Agent run failed: Agent finished without recording a decision"
+    )
 
 
 def test_failed_run_preserves_a_recorded_over_limit_decision(client, monkeypatch):

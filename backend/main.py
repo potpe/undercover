@@ -49,6 +49,9 @@ app = FastAPI(title="UnderCover", lifespan=lifespan)
 def execute_run(claim_id: str, thread_id: str) -> None:
     try:
         agent_run(claim_id, thread_id)
+        bundle = get_claim_bundle(claim_id)
+        if bundle and bundle["decision"] is None:
+            raise RuntimeError("Agent finished without recording a decision")
     except Exception as error:
         fail_run(claim_id, error)
 
