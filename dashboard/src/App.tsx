@@ -1,21 +1,14 @@
 import { useEffect, useState } from "react";
-import {
-  getInstructions,
-  listClaims,
-  type ClaimStatus,
-  type ClaimSummary,
-} from "./api";
-import { formatClaimType, formatMoney, statusLabel } from "./format";
+import { getInstructions, listClaims, type ClaimSummary } from "./api";
+import { ClaimWorkspace } from "./ClaimWorkspace";
+import { formatClaimType, formatMoney } from "./format";
+import { StatusBadge } from "./StatusBadge";
 
 type View = "queue" | "instructions";
 
-function StatusBadge({ status }: Readonly<{ status: ClaimStatus }>) {
-  return (
-    <span className={`status status-${status}`}>{statusLabel(status)}</span>
-  );
-}
-
-function QueueView() {
+function QueueView({
+  onSelect,
+}: Readonly<{ onSelect: (claimId: string) => void }>) {
   const [claims, setClaims] = useState<ClaimSummary[]>([]);
   const [state, setState] = useState<"loading" | "ready" | "error">("loading");
 
@@ -70,7 +63,16 @@ function QueueView() {
             {claims.map((claim) => (
               <tr key={claim.claim_id}>
                 <td data-label="Claim" className="mono claim-id">
-                  {claim.claim_id}
+                  <button
+                    type="button"
+                    className="claim-link"
+                    aria-label={`View claim ${claim.claim_id}`}
+                    onClick={() => {
+                      onSelect(claim.claim_id);
+                    }}
+                  >
+                    {claim.claim_id}
+                  </button>
                 </td>
                 <td data-label="Customer" className="customer-name">
                   {claim.customer_name}
@@ -138,6 +140,21 @@ function InstructionsView() {
 
 export function App() {
   const [view, setView] = useState<View>("queue");
+  const [selectedClaim, setSelectedClaim] = useState<string | null>(null);
+
+  let mainContent = <QueueView onSelect={setSelectedClaim} />;
+  if (selectedClaim) {
+    mainContent = (
+      <ClaimWorkspace
+        key={selectedClaim}
+        claimId={selectedClaim}
+        onBack={() => {
+          setSelectedClaim(null);
+        }}
+      />
+    );
+  }
+  if (view === "instructions") mainContent = <InstructionsView />;
 
   return (
     <div className="app-shell">
@@ -158,6 +175,7 @@ export function App() {
             aria-current={view === "queue" ? "page" : undefined}
             onClick={() => {
               setView("queue");
+              setSelectedClaim(null);
             }}
           >
             Claims
@@ -174,7 +192,7 @@ export function App() {
           </button>
         </nav>
       </header>
-      <main>{view === "queue" ? <QueueView /> : <InstructionsView />}</main>
+      <main>{mainContent}</main>
       <footer>Decisions grounded in the policy.</footer>
     </div>
   );

@@ -108,15 +108,15 @@ Add the selected-claim workspace and all handler actions. Show the customer's fu
 
 ### Success criteria
 
-- [ ] Selecting `CLM-1001` in the Playwright MCP browser displays its complete story, three items, four documents, policy and customer history without truncated or missing content.
-- [ ] The Run agent button calls the run operation once, disables duplicate starts, updates the state to In progress and polls for activity and decision changes until the claim leaves `in_progress`.
-- [ ] Decided claims show the decision, payout or zero amount, two- or three-sentence reason and relevant policy section. Referred and declined claims have no payment action.
-- [ ] An over-limit approval shows Waiting for sign-off and no way to record payment before sign-off. Choosing Dana and confirming sign-off performs the sign-off and separate payment requests, then shows Decided and the recorded payout.
-- [ ] Payment errors keep the claim and its recorded decision visible and show the backend message; the UI never treats a rejected payment as paid.
-- [ ] Vitest tests cover full-detail rendering, run/polling behavior, each decision kind, successful sign-off and rejected over-limit payment using mocked APIs.
-- [ ] Playwright end-to-end tests prepare deterministic decisions through backend API calls, never a model, then verify claim details, decision rendering, activity and the complete over-limit sign-off flow in the browser.
-- [ ] With the Playwright MCP browser, check the claim workspace at desktop and mobile sizes, including long documents and the sign-off controls; content remains readable, controls are keyboard accessible and money and identifiers use the intended typography.
-- [ ] `npm run check:ts` and `npm run e2e` pass with all tests green and TypeScript coverage at least 80%.
+- [x] Selecting `CLM-1001` in the Playwright MCP browser displays its complete story, three items, four documents, policy and customer history without truncated or missing content.
+- [x] The Run agent button calls the run operation once, disables duplicate starts, updates the state to In progress and polls for activity and decision changes until the claim leaves `in_progress`.
+- [x] Decided claims show the decision, payout or zero amount, two- or three-sentence reason and relevant policy section. Referred and declined claims have no payment action.
+- [x] An over-limit approval shows Waiting for sign-off and no way to record payment before sign-off. Choosing Dana and confirming sign-off performs the sign-off and separate payment requests, then shows Decided and the recorded payout.
+- [x] Payment errors keep the claim and its recorded decision visible and show the backend message; the UI never treats a rejected payment as paid.
+- [x] Vitest tests cover full-detail rendering, run/polling behavior, each decision kind, successful sign-off and rejected over-limit payment using mocked APIs.
+- [x] Playwright end-to-end tests prepare deterministic decisions through backend API calls, never a model, then verify claim details, decision rendering, activity and the complete over-limit sign-off flow in the browser.
+- [x] With the Playwright MCP browser, check the claim workspace at desktop and mobile sizes, including long documents and the sign-off controls; content remains readable, controls are keyboard accessible and money and identifiers use the intended typography.
+- [x] `npm run check:ts` and `npm run e2e` pass with all tests green and TypeScript coverage at least 80%.
 
 ## Phase 6: Pilot smoke test and handover
 
