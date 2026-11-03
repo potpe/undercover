@@ -63,14 +63,14 @@ Add the decision, sign-off and payment operations, their state transitions and a
 
 ### Success criteria
 
-- [ ] Recording an approval of at most $1,000 leaves the claim `in_progress`; recording the exact payout then makes it `decided` and stores the paid amount. A decline or referral has a zero payout and immediately becomes `decided`.
-- [ ] Recording an approval over $1,000 makes the claim `waiting_for_sign_off`, whether or not the agent subsequently attempts payment.
-- [ ] In an isolated API test, `POST /api/claims/CLM-1003/decision` records an approval for $3,750.00, and `POST /api/claims/CLM-1003/payment` with `{"amount":3750.00}` returns 409 before sign-off and records no payment.
-- [ ] Signing off `CLM-1003` with `{"handler_id":"HND-01"}` records Dana's sign-off without paying; the subsequent payment call with the same amount returns 200, makes the claim `decided` and records $3,750.00.
-- [ ] Tests prove that exactly $1,000 needs no sign-off, any amount above $1,000 does, an unknown or ineligible handler cannot sign off, and a payment cannot differ from the approved payout.
-- [ ] Tests reject decisions on completed claims, payment without an approval, payment for declined or referred claims, negative payouts and duplicate payments. Existing decisions and payment records remain unchanged after rejected calls.
-- [ ] Every accepted or rejected agent action adds a clear activity entry, including a blocked over-limit payment attempt.
-- [ ] `npm run check:python` passes all format, lint, type and unit checks with coverage at least 80%.
+- [x] Recording an approval of at most $1,000 leaves the claim `in_progress`; recording the exact payout then makes it `decided` and stores the paid amount. A decline or referral has a zero payout and immediately becomes `decided`.
+- [x] Recording an approval over $1,000 makes the claim `waiting_for_sign_off`, whether or not the agent subsequently attempts payment.
+- [x] In an isolated API test, `POST /api/claims/CLM-1003/decision` records an approval for $3,750.00, and `POST /api/claims/CLM-1003/payment` with `{"amount":3750.00}` returns 409 before sign-off and records no payment.
+- [x] Signing off `CLM-1003` with `{"handler_id":"HND-01"}` records Dana's sign-off without paying; the subsequent payment call with the same amount returns 200, makes the claim `decided` and records $3,750.00.
+- [x] Tests prove that exactly $1,000 needs no sign-off, any amount above $1,000 does, an unknown or ineligible handler cannot sign off, and a payment cannot differ from the approved payout.
+- [x] Tests reject decisions on completed claims, payment without an approval, payment for declined or referred claims, negative payouts and duplicate payments. Existing decisions and payment records remain unchanged after rejected calls.
+- [x] Every accepted or rejected agent action adds a clear activity entry, including a blocked over-limit payment attempt.
+- [x] `npm run check:python` passes all format, lint, type and unit checks with coverage at least 80%.
 
 ## Phase 3: The claim-deciding agent and run orchestration
 

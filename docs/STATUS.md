@@ -1,8 +1,8 @@
 # Status
 
-The pilot is being built. Phase 1 is complete.
+The pilot is being built. Phases 1 and 2 are complete.
 
-- `backend/`: FastAPI with a SQLite store initialized from the approved business seed files; health, claims queue, full claim bundle, policy wording and handlers APIs.
+- `backend/`: FastAPI with a SQLite store initialized from the approved business seed files; health, claims queue, full claim bundle, policy wording and handlers APIs; decision, sign-off and payment operations with the $1,000 guard.
 - `agent/`: the original hello-world agent skeleton; claim tools arrive in Phase 3.
 - `dashboard/`: the original backend health page; the claims interface arrives in Phase 4.
 - `e2e/`: the original health-page test.
@@ -25,4 +25,4 @@ The dashboard is at `http://localhost:5173` and the backend at `http://localhost
 npm run check
 ```
 
-Phase 1 verification: `npm run check:python` passed with 13 tests and 98.76% Python coverage.
+Phase 2 verification: `npm run check:python` passed with 28 tests and 98.41% Python coverage.

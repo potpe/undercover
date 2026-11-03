@@ -1,6 +1,6 @@
 from typing import Any, Literal
 
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 ClaimStatus = Literal["waiting", "in_progress", "waiting_for_sign_off", "decided"]
 DecisionKind = Literal["approve", "decline", "refer"]
@@ -22,6 +22,21 @@ class Decision(BaseModel):
     payout: float
     reason: str
     policy_section: str
+
+
+class DecisionRequest(BaseModel):
+    decision: DecisionKind
+    payout: float = Field(ge=0)
+    reason: str = Field(min_length=1)
+    policy_section: str = Field(min_length=1)
+
+
+class PaymentRequest(BaseModel):
+    amount: float = Field(gt=0)
+
+
+class SignOffRequest(BaseModel):
+    handler_id: str = Field(min_length=1)
 
 
 class Activity(BaseModel):

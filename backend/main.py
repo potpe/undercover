@@ -13,7 +13,15 @@ from backend.database import (
     list_claims,
     list_handlers,
 )
-from backend.models import ClaimBundle, ClaimSummary, PolicyWording
+from backend.models import (
+    ClaimBundle,
+    ClaimSummary,
+    DecisionRequest,
+    PaymentRequest,
+    PolicyWording,
+    SignOffRequest,
+)
+from backend.workflow import record_decision, record_payment, sign_off
 
 
 @asynccontextmanager
@@ -44,6 +52,27 @@ def claim(claim_id: str) -> ClaimBundle:
     if bundle is None:
         raise HTTPException(status_code=404, detail="Claim not found")
     return ClaimBundle(**bundle)
+
+
+@app.post("/api/claims/{claim_id}/decision", operation_id="record_decision")
+def decision(claim_id: str, request: DecisionRequest) -> ClaimBundle:
+    """Record the agent's decision for a claim."""
+    record_decision(claim_id, request)
+    return claim(claim_id)
+
+
+@app.post("/api/claims/{claim_id}/sign-off", operation_id="sign_off_claim")
+def sign_off_claim(claim_id: str, request: SignOffRequest) -> ClaimBundle:
+    """Record a handler's sign-off for an over-limit payout."""
+    sign_off(claim_id, request)
+    return claim(claim_id)
+
+
+@app.post("/api/claims/{claim_id}/payment", operation_id="record_payment")
+def payment(claim_id: str, request: PaymentRequest) -> ClaimBundle:
+    """Record a claim payment after checking the approval rules."""
+    record_payment(claim_id, request)
+    return claim(claim_id)
 
 
 @app.get("/api/policy-wording", operation_id="get_policy_wording")

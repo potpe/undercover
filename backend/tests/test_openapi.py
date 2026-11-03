@@ -10,6 +10,9 @@ def test_operations_have_ids_docstrings_and_required_inputs(client):
             if body:
                 assert body["required"] is True
                 content = body["content"]["application/json"]["schema"]
+                if "$ref" in content:
+                    model_name = content["$ref"].rsplit("/", 1)[-1]
+                    content = schema["components"]["schemas"][model_name]
                 assert set(content.get("required", [])) == set(content["properties"])
 
     assert len(operation_ids) == len(set(operation_ids))

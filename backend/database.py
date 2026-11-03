@@ -129,12 +129,18 @@ def initialize_database() -> None:
             )
 
 
+def insert_activity(
+    connection: sqlite3.Connection, claim_id: str, message: str
+) -> None:
+    connection.execute(
+        "INSERT INTO activity (claim_id, message, created_at) VALUES (?, ?, ?)",
+        (claim_id, message, datetime.now(UTC).isoformat()),
+    )
+
+
 def add_activity(claim_id: str, message: str) -> None:
     with connect() as connection:
-        connection.execute(
-            "INSERT INTO activity (claim_id, message, created_at) VALUES (?, ?, ?)",
-            (claim_id, message, datetime.now(UTC).isoformat()),
-        )
+        insert_activity(connection, claim_id, message)
 
 
 def list_claims() -> list[dict[str, Any]]:
