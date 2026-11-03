@@ -1,11 +1,11 @@
 # Status
 
-The pilot is being built. Phases 1 through 3 are complete.
+The pilot is being built. Phases 1 through 4 are complete.
 
 - `backend/`: FastAPI with a SQLite store initialized from the approved business seed files; health, claims queue, full claim bundle, policy wording and handlers APIs; decision, sign-off and payment operations with the $1,000 guard.
 - `agent/`: LangChain `create_agent` with a two-argument entry point and API-only tools for claim data, policy wording, decisions and payment; backend-run orchestration and ordered activity.
-- `dashboard/`: the original backend health page; the claims interface arrives in Phase 4.
-- `e2e/`: the original health-page test.
+- `dashboard/`: branded, responsive claims queue and read-only agent instructions, with loading and error states.
+- `e2e/`: browser tests for the 25-claim queue and read-only instructions; no model calls.
 
 The local database is `backend/undercover.db` and is git-ignored. Tests use isolated temporary databases.
 
@@ -25,4 +25,4 @@ The dashboard is at `http://localhost:5173` and the backend at `http://localhost
 npm run check
 ```
 
-Phase 3 verification: `npm run check:python` passed with 36 tests and 98.45% Python coverage. All agent tests use stub models.
+Phase 4 verification: Python checks remain green; `npm run check:ts` passed seven tests with 98.07% statement coverage, and two Playwright tests passed. Desktop and mobile browser checks found no horizontal overflow.

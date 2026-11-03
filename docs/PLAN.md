@@ -94,13 +94,13 @@ Build the dashboard shell, typed API client, claims queue and instructions view.
 
 ### Success criteria
 
-- [ ] The queue shows all 25 claims with claim id, customer, claim type, summary, claimed amount and current labeled state; money uses USD formatting such as `$1,250.00`.
-- [ ] The instructions view shows the same text returned by `GET /api/agent/instructions` and has no editing control.
-- [ ] Loading and failed-request states are visible and understandable, and repeated renders do not issue duplicate requests.
-- [ ] Vitest component tests cover queue rendering, all four state labels, currency formatting, API failures and instructions rendering with mocked HTTP responses. TypeScript remains strict with no `any`.
-- [ ] Playwright end-to-end tests open the real dashboard and backend, verify the 25-claim queue and read-only instructions, and make no model calls.
-- [ ] With the Playwright MCP browser at desktop and mobile sizes, check that the queue and instructions are readable, navigation and focus states work, text has sufficient contrast, and there is no horizontal overflow.
-- [ ] `npm run check:ts` and `npm run e2e` pass, including Vitest coverage of at least 80%.
+- [x] The queue shows all 25 claims with claim id, customer, claim type, summary, claimed amount and current labeled state; money uses USD formatting such as `$1,250.00`.
+- [x] The instructions view shows the same text returned by `GET /api/agent/instructions` and has no editing control.
+- [x] Loading and failed-request states are visible and understandable, and repeated renders do not issue duplicate requests.
+- [x] Vitest component tests cover queue rendering, all four state labels, currency formatting, API failures and instructions rendering with mocked HTTP responses. TypeScript remains strict with no `any`.
+- [x] Playwright end-to-end tests open the real dashboard and backend, verify the 25-claim queue and read-only instructions, and make no model calls.
+- [x] With the Playwright MCP browser at desktop and mobile sizes, check that the queue and instructions are readable, navigation and focus states work, text has sufficient contrast, and there is no horizontal overflow.
+- [x] `npm run check:ts` and `npm run e2e` pass, including Vitest coverage of at least 80%.
 
 ## Phase 5: Claim workspace, live activity and handler sign-off
 
