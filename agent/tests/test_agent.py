@@ -9,6 +9,8 @@ from backend.main import app
 class StubModel(GenericFakeChatModel):
     """A chat model that gives scripted replies in place of a real model."""
 
+    model_name: str = "stub-model"
+
     def bind_tools(self, tools, **kwargs):
         return self
 
@@ -90,7 +92,11 @@ def test_run_approves_and_pays_a_small_claim(client, monkeypatch):
         ),
         AIMessage(content="Claim CLM-1001 approved for $420.00."),
     ]
-    monkeypatch.setattr(main, "model", lambda: StubModel(messages=iter(replies)))
+    monkeypatch.setattr(
+        main,
+        "model",
+        lambda: StubModel(messages=iter(replies), model_name="openrouter/free"),
+    )
 
     result = main.run("CLM-1001", "thread-1")
 
@@ -100,6 +106,7 @@ def test_run_approves_and_pays_a_small_claim(client, monkeypatch):
     assert bundle["decision"]["payout"] == 420.0
     assert bundle["paid_amount"] == 420.0
     assert [entry["message"] for entry in bundle["activity"]] == [
+        "Using model openrouter/free",
         "Read claim, policy and customer claim history",
         "Read policy wording 2026.1",
         "Decision recorded: approve for $420.00",

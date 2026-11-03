@@ -101,8 +101,10 @@ def run(claim_id: str, thread_id: str) -> str:
     with backend() as client:
         response = client.get("/api/agent/instructions")
     response.raise_for_status()
+    selected_model = model()
+    log_activity(claim_id, f"Using model {selected_model.model_name}")
     agent = create_agent(
-        model(),
+        selected_model,
         tools=[read_claim, read_policy_wording, record_claim_decision, pay_claim],
         system_prompt=response.json()["content"],
     )
