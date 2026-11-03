@@ -1,23 +1,34 @@
 # Status
 
-The pilot is being built. Phases 1 through 5 are complete.
+The UnderCover claims pilot is complete.
 
-- `backend/`: FastAPI with a SQLite store initialized from the approved business seed files; health, claims queue, full claim bundle, policy wording and handlers APIs; decision, sign-off and payment operations with the $1,000 guard.
-- `agent/`: LangChain `create_agent` with a two-argument entry point and API-only tools for claim data, policy wording, decisions and payment; backend-run orchestration and ordered activity.
-- `dashboard/`: branded, responsive claims queue, full claim workspace, live agent activity, decision details, read-only instructions and handler sign-off/payment controls.
-- `e2e/`: five browser tests for the queue, instructions, full claim details, recorded decisions and over-limit sign-off; an isolated SQLite database is reset on each test-server start, and no model is called.
+- `backend/`: FastAPI and SQLite, initialized only from the approved business seed files. APIs cover the 25-claim queue, full claim bundles, policy wording, handlers, agent instructions, runs, decisions, activity, sign-off and payment. The backend blocks payments over $1,000 until an eligible handler signs off.
+- `agent/`: LangChain `create_agent` with `run(claim_id, thread_id)` and API-only tools for claim data, policy wording, decisions and payment. The default model is `openai/gpt-6-luna` with low reasoning effort; `MODEL_NAME` overrides it.
+- `dashboard/`: branded, responsive claims queue, full claim workspace, live agent activity, decision reasons and policy citations, read-only instructions, and handler sign-off/payment controls.
+- `e2e/`: five Playwright tests covering the queue, instructions, claim details, decisions and over-limit sign-off. They use an isolated SQLite database and never call a model.
 
-The local database is `backend/undercover.db` and is git-ignored. Tests use isolated temporary databases.
-
-## Run
+## Set up
 
 ```sh
 uv sync
 npm install
+```
+
+Set `OPENROUTER_API_KEY` in `.env`. Optionally set `MODEL_NAME`, for example `MODEL_NAME=openrouter/free`.
+
+## Run
+
+```sh
 npm run dev
 ```
 
-The dashboard is at `http://localhost:5173` and the backend at `http://localhost:8000`.
+Open `http://localhost:5173`. The backend listens at `http://localhost:8000`.
+
+The local database is `backend/undercover.db` and is git-ignored. To reset all pilot decisions and activity, stop the servers, remove the database, then restart:
+
+```sh
+uv run python -c 'from pathlib import Path; Path("backend/undercover.db").unlink(missing_ok=True)'
+```
 
 ## Check
 
@@ -25,4 +36,10 @@ The dashboard is at `http://localhost:5173` and the backend at `http://localhost
 npm run check
 ```
 
-Phase 5 verification: `npm run check:ts` passed 14 tests with 93.19% statement coverage, and five Playwright tests passed. Desktop/mobile checks covered full details, long documents and sign-off; the browser console had no errors.
+This runs Ruff, Pyright, pytest with at least 80% coverage, Prettier, ESLint, tsc, Vitest with at least 80% coverage, and Playwright. Stop the development servers first so Playwright can start its isolated test database.
+
+## Verification
+
+The real-model smoke run approved `CLM-1001` for $420.00, cited policy sections 3 and 10, recorded a three-sentence reason and ended Decided. The over-limit flow remained blocked before sign-off and recorded $3,750.00 after Dana signed off. Final browser checks had no console errors.
+
+Final `npm run check`: all Ruff, Pyright, Prettier, ESLint and tsc checks passed; 36 Python tests passed with 98.45% coverage; 14 Vitest tests passed with 93.19% statement coverage; five Playwright tests passed without model calls.

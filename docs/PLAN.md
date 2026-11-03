@@ -124,12 +124,12 @@ Finish the operating documentation, reset to a clean seed database and run the c
 
 ### Success criteria
 
-- [ ] `docs/STATUS.md` describes the finished pilot, database initialization/reset, `.env` keys, `MODEL_NAME`, `uv sync`, `npm install`, `npm run dev`, the dashboard URL and `npm run check`.
-- [ ] A manual smoke run of `CLM-1001` with the configured OpenRouter model completes through the dashboard or `agent.run("CLM-1001", "pilot-smoke")`: it approves using policy sections 3 and 10, records $420.00, gives a two- or three-sentence reason and ends Decided. This is not part of the automated test suite.
-- [ ] The over-limit smoke scenario remains blocked until a handler signs off, with the backend API and dashboard agreeing on its state and paid amount.
-- [ ] A final code and data-path review confirms that the agent has no direct file access, the claims manual and `data/evals/` were not used, no held-out claims entered the queue, and no real payment or customer-message integration exists.
-- [ ] From a clean checkout-style setup, `npm run check` runs every Python, TypeScript and Playwright check successfully; Ruff, ESLint, Prettier, Pyright and tsc pass, both coverage reports are at least 80%, and all end-to-end tests pass without model calls.
-- [ ] The final browser smoke check shows the queue, full claim, activity, decision and read-only instructions working together with no browser console errors.
+- [x] `docs/STATUS.md` describes the finished pilot, database initialization/reset, `.env` keys, `MODEL_NAME`, `uv sync`, `npm install`, `npm run dev`, the dashboard URL and `npm run check`.
+- [x] A manual smoke run of `CLM-1001` with the configured OpenRouter model completes through the dashboard or `agent.run("CLM-1001", "pilot-smoke")`: it approves using policy sections 3 and 10, records $420.00, gives a two- or three-sentence reason and ends Decided. This is not part of the automated test suite.
+- [x] The over-limit smoke scenario remains blocked until a handler signs off, with the backend API and dashboard agreeing on its state and paid amount.
+- [x] A final code and data-path review confirms that the agent has no direct file access, the claims manual and `data/evals/` were not used, no held-out claims entered the queue, and no real payment or customer-message integration exists.
+- [x] From a clean checkout-style setup, `npm run check` runs every Python, TypeScript and Playwright check successfully; Ruff, ESLint, Prettier, Pyright and tsc pass, both coverage reports are at least 80%, and all end-to-end tests pass without model calls.
+- [x] The final browser smoke check shows the queue, full claim, activity, decision and read-only instructions working together with no browser console errors.
 
 ## Build checkpoints
 
