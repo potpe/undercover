@@ -80,13 +80,13 @@ The instructions will require the agent to read the complete claim and wording, 
 
 ### Success criteria
 
-- [ ] `GET /api/agent/instructions` returns the complete instructions used by `create_agent`; the instructions mention only the policy wording and provide no access to evaluation answers or the claims manual.
-- [ ] Agent tools reach claim data, instructions, decisions and payments only through the backend HTTP API. The agent package contains no reads of `data/` and no `check_backend` hello-world tool.
-- [ ] `run` retains the public two-argument entry point, uses `openai/gpt-6-luna` with low reasoning effort by default, honors `MODEL_NAME`, and passes the supplied claim id and thread id to the agent.
-- [ ] A stub-model integration test scripts tool calls for `CLM-1001`: read claim, read wording, approve for $420.00 with a short reason and section 3 citation, then record payment. The final API state is `decided`, the payout and paid amount are $420.00, and the activity is in call order. No real model is called.
-- [ ] A second stub-model test approves `CLM-1003` for $3,750.00 without requesting payment. Its final state is `waiting_for_sign_off`, and a direct over-limit payment attempt remains blocked by the backend.
-- [ ] `POST /api/claims/CLM-1001/run` with a required thread id returns 202 with `in_progress`; duplicate runs and runs for decided claims return 409. A failed run adds a visible failure activity and makes an undecided claim `waiting` again without erasing an already-recorded decision or sign-off.
-- [ ] `npm run check:python` passes with all agent tests using a stub model and total Python coverage at least 80%.
+- [x] `GET /api/agent/instructions` returns the complete instructions used by `create_agent`; the instructions mention only the policy wording and provide no access to evaluation answers or the claims manual.
+- [x] Agent tools reach claim data, instructions, decisions and payments only through the backend HTTP API. The agent package contains no reads of `data/` and no `check_backend` hello-world tool.
+- [x] `run` retains the public two-argument entry point, uses `openai/gpt-6-luna` with low reasoning effort by default, honors `MODEL_NAME`, and passes the supplied claim id and thread id to the agent.
+- [x] A stub-model integration test scripts tool calls for `CLM-1001`: read claim, read wording, approve for $420.00 with a short reason and section 3 citation, then record payment. The final API state is `decided`, the payout and paid amount are $420.00, and the activity is in call order. No real model is called.
+- [x] A second stub-model test approves `CLM-1003` for $3,750.00 without requesting payment. Its final state is `waiting_for_sign_off`, and a direct over-limit payment attempt remains blocked by the backend.
+- [x] `POST /api/claims/CLM-1001/run` with a required thread id returns 202 with `in_progress`; duplicate runs and runs for decided claims return 409. A failed run adds a visible failure activity and makes an undecided claim `waiting` again without erasing an already-recorded decision or sign-off.
+- [x] `npm run check:python` passes with all agent tests using a stub model and total Python coverage at least 80%.
 
 ## Phase 4: Branded queue and read-only instructions
 

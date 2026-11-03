@@ -140,3 +140,24 @@ def record_payment(claim_id: str, request: PaymentRequest) -> None:
         insert_activity(
             connection, claim_id, f"Payment recorded: {money(request.amount)}"
         )
+
+
+def start_run(claim_id: str) -> None:
+    with connect() as connection:
+        row = claim_row(connection, claim_id)
+        if row["status"] != "waiting":
+            reject(connection, claim_id, "Claim is not waiting to run")
+        connection.execute(
+            "UPDATE claims SET status = 'in_progress' WHERE claim_id = ?", (claim_id,)
+        )
+        insert_activity(connection, claim_id, "Agent run started")
+
+
+def fail_run(claim_id: str, error: Exception) -> None:
+    with connect() as connection:
+        row = claim_row(connection, claim_id)
+        insert_activity(connection, claim_id, f"Agent run failed: {error}")
+        if row["decision"] is None:
+            connection.execute(
+                "UPDATE claims SET status = 'waiting' WHERE claim_id = ?", (claim_id,)
+            )

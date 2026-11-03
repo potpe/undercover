@@ -39,6 +39,23 @@ class SignOffRequest(BaseModel):
     handler_id: str = Field(min_length=1)
 
 
+class RunRequest(BaseModel):
+    thread_id: str = Field(min_length=1)
+
+
+class RunResponse(BaseModel):
+    claim_id: str
+    status: Literal["in_progress"]
+
+
+class ActivityRequest(BaseModel):
+    message: str = Field(min_length=1)
+
+
+class Instructions(BaseModel):
+    content: str
+
+
 class Activity(BaseModel):
     id: int
     message: str
