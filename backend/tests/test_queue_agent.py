@@ -1,3 +1,4 @@
+import httpx
 from fastapi.testclient import TestClient
 from langchain_core.language_models.fake_chat_models import GenericFakeChatModel
 from langchain_core.messages import AIMessage
@@ -234,6 +235,28 @@ def test_queue_agent_can_correct_a_rejected_plan(client, monkeypatch):
     assert run["status"] == "completed"
     assert len(run["todos"]) == 1
     assert run["todos"][0]["status"] == "done"
+
+
+def test_work_timeout_is_nonfatal_to_the_queue(monkeypatch):
+    class TimeoutClient:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *args):
+            return None
+
+        def post(self, path, **kwargs):
+            raise httpx.TimeoutException("timed out")
+
+    monkeypatch.setattr(queue_agent, "backend", TimeoutClient)
+
+    result = queue_agent.queue_tools(1, "stub-model")[2].invoke(
+        {"claim_id": "CLM-1001"}
+    )
+
+    assert result["status"] == "in_progress"
+    assert result["claim_id"] == "CLM-1001"
+    assert "check_todos" in result["result"]
 
 
 def test_duplicate_finish_does_not_change_the_run(client, monkeypatch):

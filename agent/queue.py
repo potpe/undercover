@@ -3,6 +3,7 @@
 from http import HTTPStatus
 from typing import Any
 
+import httpx
 from langchain.agents import create_agent
 from langchain_core.tools import tool
 
@@ -57,10 +58,22 @@ def queue_tools(run_id: int, model_name: str):
     @tool
     def work_claim(claim_id: str) -> dict[str, Any]:
         """Delegate one selected claim to a fresh subagent and return its outcome."""
-        with backend() as client:
-            response = client.post(
-                f"/api/runs/{run_id}/work", json={"claim_id": claim_id}
-            )
+        try:
+            with backend() as client:
+                response = client.post(
+                    f"/api/runs/{run_id}/work",
+                    json={"claim_id": claim_id},
+                )
+        except httpx.TimeoutException:
+            return {
+                "run_id": run_id,
+                "claim_id": claim_id,
+                "status": "in_progress",
+                "result": (
+                    "Work request timed out; call check_todos before deciding "
+                    "whether to retry."
+                ),
+            }
         response.raise_for_status()
         return response.json()
 

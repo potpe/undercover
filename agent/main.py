@@ -19,7 +19,7 @@ DEFAULT_MODEL = "deepseek/deepseek-v4.1-flash"
 
 def backend() -> httpx.Client:
     """Return a client for the UnderCover backend."""
-    return httpx.Client(base_url=BACKEND_URL, timeout=10)
+    return httpx.Client(base_url=BACKEND_URL, timeout=120)
 
 
 def log_activity(claim_id: str, message: str) -> None:
@@ -110,6 +110,7 @@ def model() -> ChatOpenAI:
         base_url=OPENROUTER_BASE_URL,
         api_key=SecretStr(os.environ["OPENROUTER_API_KEY"]),
         reasoning_effort=None if name else "low",
+        timeout=60,
     )
 
 
