@@ -38,7 +38,9 @@ def test_run_endpoint_executes_the_agent(client, monkeypatch):
     response = client.post("/api/claims/CLM-1001/run", json={"thread_id": "thread-api"})
 
     assert response.status_code == 202
-    assert response.json() == {"claim_id": "CLM-1001", "status": "in_progress"}
+    assert response.json()["claim_id"] == "CLM-1001"
+    assert response.json()["status"] == "in_progress"
+    assert response.json()["run_id"]
     bundle = client.get("/api/claims/CLM-1001").json()
     assert bundle["claim"]["status"] == "decided"
     assert bundle["activity"][0]["message"] == "Agent run started"

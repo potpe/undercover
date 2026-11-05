@@ -44,8 +44,45 @@ class RunRequest(BaseModel):
 
 
 class RunResponse(BaseModel):
+    run_id: int
     claim_id: str
     status: Literal["in_progress"]
+
+
+class QueueRunRequest(BaseModel):
+    thread_id: str = Field(min_length=1)
+    claim_cap: int = Field(ge=1, le=25)
+
+
+class RunPlanRequest(BaseModel):
+    claim_ids: list[str] = Field(min_length=1)
+    model_name: str = Field(min_length=1)
+
+
+class FinishRunRequest(BaseModel):
+    summary: str = Field(min_length=1)
+
+
+class RunTodo(BaseModel):
+    claim_id: str
+    position: int
+    status: Literal["to_do", "in_progress", "done", "left_for_handler"]
+    attempts: int
+    result: str | None
+    error: str | None
+
+
+class AgentRun(BaseModel):
+    run_id: int
+    thread_id: str
+    claim_cap: int
+    target_claim_id: str | None
+    model_name: str | None
+    status: Literal["in_progress", "completed"]
+    summary: str | None
+    created_at: str
+    completed_at: str | None
+    todos: list[RunTodo]
 
 
 class ActivityRequest(BaseModel):

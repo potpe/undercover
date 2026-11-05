@@ -19,6 +19,7 @@ from backend.database import (
 )
 from backend.models import (
     ActivityRequest,
+    AgentRun,
     ClaimBundle,
     ClaimSummary,
     DecisionRequest,
@@ -26,11 +27,23 @@ from backend.models import (
     DocumentSectionContent,
     DocumentSectionRequest,
     DocumentSectionSummary,
+    FinishRunRequest,
     Instructions,
     PaymentRequest,
+    QueueRunRequest,
+    RunPlanRequest,
     RunRequest,
     RunResponse,
     SignOffRequest,
+)
+from backend.runs import (
+    create_run as create_agent_run,
+)
+from backend.runs import (
+    current_run,
+    finish_run,
+    get_run,
+    save_plan,
 )
 from backend.workflow import (
     fail_run,
@@ -107,9 +120,44 @@ def run_claim(
     claim_id: str, request: RunRequest, background_tasks: BackgroundTasks
 ) -> RunResponse:
     """Start the UnderCover Agent on a waiting claim."""
+    run = create_agent_run(request.thread_id, 1, claim_id)
     start_run(claim_id)
     background_tasks.add_task(execute_run, claim_id, request.thread_id)
-    return RunResponse(claim_id=claim_id, status="in_progress")
+    return RunResponse(run_id=run["run_id"], claim_id=claim_id, status="in_progress")
+
+
+@app.post("/api/runs", operation_id="create_queue_run", status_code=202)
+def queue_run(request: QueueRunRequest) -> AgentRun:
+    """Create a capped queue run for the UnderCover Agent."""
+    return AgentRun(**create_agent_run(request.thread_id, request.claim_cap))
+
+
+@app.get("/api/runs/current", operation_id="get_current_run")
+def current_agent_run() -> AgentRun | None:
+    """Return the active or latest agent run."""
+    run = current_run()
+    return AgentRun(**run) if run else None
+
+
+@app.get("/api/runs/{run_id}", operation_id="get_agent_run")
+def get_agent_run(run_id: int) -> AgentRun:
+    """Return one agent run and its ordered to-dos."""
+    run = get_run(run_id)
+    if run is None:
+        raise HTTPException(status_code=404, detail="Run not found")
+    return AgentRun(**run)
+
+
+@app.post("/api/runs/{run_id}/plan", operation_id="plan_agent_run")
+def plan_agent_run(run_id: int, request: RunPlanRequest) -> AgentRun:
+    """Save an agent-selected ordered plan within the run cap."""
+    return AgentRun(**save_plan(run_id, request.claim_ids, request.model_name))
+
+
+@app.post("/api/runs/{run_id}/finish", operation_id="finish_agent_run")
+def finish_agent_run(run_id: int, request: FinishRunRequest) -> AgentRun:
+    """Complete a run after checking for unfinished selected claims."""
+    return AgentRun(**finish_run(run_id, request.summary))
 
 
 @app.post("/api/claims/{claim_id}/activity", operation_id="record_activity")

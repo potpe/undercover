@@ -89,6 +89,28 @@ def initialize_database() -> None:
                 created_at TEXT NOT NULL,
                 UNIQUE (claim_id, document, section_id)
             );
+            CREATE TABLE IF NOT EXISTS runs (
+                run_id INTEGER PRIMARY KEY AUTOINCREMENT,
+                thread_id TEXT NOT NULL,
+                claim_cap INTEGER NOT NULL,
+                target_claim_id TEXT,
+                model_name TEXT,
+                status TEXT NOT NULL,
+                summary TEXT,
+                created_at TEXT NOT NULL,
+                completed_at TEXT
+            );
+            CREATE TABLE IF NOT EXISTS run_todos (
+                run_id INTEGER NOT NULL,
+                claim_id TEXT NOT NULL,
+                position INTEGER NOT NULL,
+                status TEXT NOT NULL,
+                attempts INTEGER NOT NULL DEFAULT 0,
+                result TEXT,
+                error TEXT,
+                PRIMARY KEY (run_id, claim_id),
+                UNIQUE (run_id, position)
+            );
             """
         )
         for document in ("policy_wording", "claims_manual"):

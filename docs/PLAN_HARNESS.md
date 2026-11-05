@@ -79,14 +79,14 @@ Add run and to-do persistence, the current/specific run responses and plan valid
 
 ### Success criteria
 
-- [ ] Creating a queue run with cap five returns 202 and an `in_progress` run with the required thread id and no to-dos while the agent is planning.
-- [ ] A stub-driven plan of five waiting claims stores the five ids in the agent's chosen order as `to_do`, including position, zero attempts and empty result/error fields.
-- [ ] Tests reject six items under cap five, duplicate ids, unknown or already-decided claims, an under-filled plan while more eligible claims remain, and a second plan for the same run.
-- [ ] Caps one and 25 work, a cap above 25 or below one returns 422, and a run with fewer waiting claims than its cap plans only those claims.
-- [ ] A named-claim run creates a target of exactly that waiting claim with cap one; it cannot plan a different claim.
-- [ ] `GET /api/runs/current` and `GET /api/runs/{run_id}` return ordered to-dos, cap, target, model, status, summary and timestamps; the current response still shows the latest completed run for handlers.
-- [ ] OpenAPI tests continue to prove unique operation ids, docstrings and required request fields.
-- [ ] `npm run check:python` passes with all new state and validation tests and at least 80% coverage.
+- [x] Creating a queue run with cap five returns 202 and an `in_progress` run with the required thread id and no to-dos while the agent is planning.
+- [x] A stub-driven plan of five waiting claims stores the five ids in the agent's chosen order as `to_do`, including position, zero attempts and empty result/error fields.
+- [x] Tests reject six items under cap five, duplicate ids, unknown or already-decided claims, an under-filled plan while more eligible claims remain, and a second plan for the same run.
+- [x] Caps one and 25 work, a cap above 25 or below one returns 422, and a run with fewer waiting claims than its cap plans only those claims.
+- [x] A named-claim run creates a target of exactly that waiting claim with cap one; it cannot plan a different claim.
+- [x] `GET /api/runs/current` and `GET /api/runs/{run_id}` return ordered to-dos, cap, target, model, status, summary and timestamps; the current response still shows the latest completed run for handlers.
+- [x] OpenAPI tests continue to prove unique operation ids, docstrings and required request fields.
+- [x] `npm run check:python` passes with all new state and validation tests and at least 80% coverage.
 
 ## Phase 3: Fresh claim subagents and automatic recovery
 
