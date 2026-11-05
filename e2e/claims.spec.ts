@@ -20,7 +20,13 @@ test("the agent instructions are read only", async ({ page }) => {
     page.getByRole("heading", { name: "Agent instructions" }),
   ).toBeVisible();
   await expect(
-    page.getByText("You are the UnderCover Agent.", { exact: false }),
+    page.getByRole("heading", { name: "Queue agent" }),
+  ).toBeVisible();
+  await expect(
+    page.getByRole("heading", { name: "Claim agent" }),
+  ).toBeVisible();
+  await expect(
+    page.getByText("You are the UnderCover queue agent.", { exact: false }),
   ).toBeVisible();
   await expect(page.getByRole("textbox")).toHaveCount(0);
 });
@@ -157,4 +163,110 @@ test("an over-limit payout is paid only after handler sign-off", async ({
   const result = await request.get("http://127.0.0.1:8000/api/claims/CLM-1003");
   const body = (await result.json()) as { paid_amount: number | null };
   expect(body.paid_amount).toBe(3750);
+});
+
+test("the dashboard shows run to-dos and the sections read", async ({
+  page,
+  request,
+}) => {
+  const run = {
+    run_id: 7,
+    thread_id: "browser",
+    claim_cap: 5,
+    target_claim_id: null,
+    model_name: "deepseek/deepseek-v4.1-flash",
+    status: "completed",
+    summary: "5 claims handled: 4 done, 1 left for handler.",
+    created_at: "2026-11-05T12:00:00Z",
+    completed_at: "2026-11-05T12:05:00Z",
+    todos: [
+      {
+        claim_id: "CLM-1001",
+        position: 1,
+        status: "done",
+        attempts: 0,
+        result: "Approve $420.00",
+        error: null,
+      },
+      {
+        claim_id: "CLM-1002",
+        position: 2,
+        status: "left_for_handler",
+        attempts: 2,
+        result: "Provider failed",
+        error: "Provider failed",
+      },
+      {
+        claim_id: "CLM-1003",
+        position: 3,
+        status: "to_do",
+        attempts: 0,
+        result: null,
+        error: null,
+      },
+      {
+        claim_id: "CLM-1004",
+        position: 4,
+        status: "in_progress",
+        attempts: 1,
+        result: null,
+        error: null,
+      },
+      {
+        claim_id: "CLM-1005",
+        position: 5,
+        status: "done",
+        attempts: 0,
+        result: "Approve $243.00",
+        error: null,
+      },
+    ],
+  };
+  await page.route("**/api/runs/current", (route) =>
+    route.fulfill({ json: run }),
+  );
+  await request.post(
+    "http://127.0.0.1:8000/api/claims/CLM-1001/document-section",
+    { data: { document: "claims_manual", section_id: "10" } },
+  );
+  await request.post(
+    "http://127.0.0.1:8000/api/claims/CLM-1001/document-section",
+    { data: { document: "policy_wording", section_id: "3" } },
+  );
+
+  await page.goto("/");
+  await expect(
+    page.getByText("5 claims handled: 4 done, 1 left for handler."),
+  ).toBeVisible();
+  await expect(page.getByText("deepseek/deepseek-v4.1-flash")).toBeVisible();
+  await expect(page.locator(".todo-list li")).toHaveCount(5);
+  await expect(
+    page.locator(".todo-status").getByText("Left for handler", { exact: true }),
+  ).toBeVisible();
+
+  await page
+    .getByRole("button", { name: "View claim CLM-1001" })
+    .first()
+    .click();
+  await expect(
+    page.getByRole("heading", { name: "Sections read" }),
+  ).toBeVisible();
+  await expect(
+    page.getByText("Claims manual 10: Meals without receipts", { exact: true }),
+  ).toBeVisible();
+  await expect(
+    page.getByText("Policy wording 3: Trip Delay", { exact: true }),
+  ).toBeVisible();
+});
+
+test("the queue cap is validated without starting a model run", async ({
+  page,
+}) => {
+  await page.goto("/");
+  await page.getByLabel("Claim cap").fill("0");
+  await page.getByRole("button", { name: "Run queue" }).click();
+
+  await expect(page.getByRole("alert")).toHaveText(
+    "Claim cap must be a whole number from 1 to 25.",
+  );
 });

@@ -20,6 +20,7 @@ export function statusLabel(status: ClaimStatus): string {
     in_progress: "In progress",
     waiting_for_sign_off: "Waiting for sign-off",
     decided: "Decided",
+    left_for_handler: "Left for handler",
   };
   return labels[status];
 }

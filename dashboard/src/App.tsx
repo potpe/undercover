@@ -1,7 +1,15 @@
 import { useEffect, useState } from "react";
-import { getInstructions, listClaims, type ClaimSummary } from "./api";
+import {
+  createQueueRun,
+  getCurrentRun,
+  getInstructions,
+  listClaims,
+  type AgentRun,
+  type ClaimSummary,
+} from "./api";
 import { ClaimWorkspace } from "./ClaimWorkspace";
 import { formatClaimType, formatMoney } from "./format";
+import { RunPanel } from "./RunPanel";
 import { StatusBadge } from "./StatusBadge";
 
 type View = "queue" | "instructions";
@@ -10,14 +18,19 @@ function QueueView({
   onSelect,
 }: Readonly<{ onSelect: (claimId: string) => void }>) {
   const [claims, setClaims] = useState<ClaimSummary[]>([]);
+  const [run, setRun] = useState<AgentRun | null>(null);
+  const [cap, setCap] = useState("5");
   const [state, setState] = useState<"loading" | "ready" | "error">("loading");
+  const [busy, setBusy] = useState(false);
+  const [actionError, setActionError] = useState("");
 
   useEffect(() => {
     let active = true;
-    listClaims()
-      .then((data) => {
+    Promise.all([listClaims(), getCurrentRun()])
+      .then(([claimData, runData]) => {
         if (active) {
-          setClaims(data);
+          setClaims(claimData);
+          setRun(runData);
           setState("ready");
         }
       })
@@ -29,6 +42,52 @@ function QueueView({
     };
   }, []);
 
+  useEffect(() => {
+    if (run?.status !== "in_progress") return;
+    let active = true;
+    const timer = window.setInterval(() => {
+      Promise.all([listClaims(), getCurrentRun()])
+        .then(([claimData, runData]) => {
+          if (active) {
+            setClaims(claimData);
+            setRun(runData);
+          }
+        })
+        .catch((error: unknown) => {
+          if (active) {
+            setActionError(
+              error instanceof Error ? error.message : "Run refresh failed.",
+            );
+          }
+        });
+    }, 500);
+    return () => {
+      active = false;
+      window.clearInterval(timer);
+    };
+  }, [run?.status]);
+
+  async function handleRun() {
+    const claimCap = Number(cap);
+    if (!Number.isInteger(claimCap) || claimCap < 1 || claimCap > 25) {
+      setActionError("Claim cap must be a whole number from 1 to 25.");
+      return;
+    }
+    setBusy(true);
+    setActionError("");
+    try {
+      setRun(
+        await createQueueRun(claimCap, `dashboard-${crypto.randomUUID()}`),
+      );
+    } catch (error) {
+      setActionError(
+        error instanceof Error ? error.message : "Could not start run.",
+      );
+    } finally {
+      setBusy(false);
+    }
+  }
+
   if (state === "loading") return <p role="status">Loading claims queue…</p>;
   if (state === "error") {
     return (
@@ -39,67 +98,78 @@ function QueueView({
   }
 
   return (
-    <section className="panel queue-panel" aria-labelledby="queue-title">
-      <div className="section-heading">
-        <div>
-          <p className="eyebrow">Claims operations</p>
-          <h1 id="queue-title">Claims queue</h1>
-          <p>Review the queue and see where each claim stands.</p>
+    <div className="queue-layout">
+      <RunPanel
+        run={run}
+        cap={cap}
+        busy={busy}
+        error={actionError}
+        onCapChange={setCap}
+        onRun={handleRun}
+        onSelect={onSelect}
+      />
+      <section className="panel queue-panel" aria-labelledby="queue-title">
+        <div className="section-heading">
+          <div>
+            <p className="eyebrow">Claims operations</p>
+            <h1 id="queue-title">Claims queue</h1>
+            <p>Review the queue and see where each claim stands.</p>
+          </div>
+          <span className="count">{claims.length} claims</span>
         </div>
-        <span className="count">{claims.length} claims</span>
-      </div>
-      <div className="table-scroll">
-        <table>
-          <thead>
-            <tr>
-              <th scope="col">Claim</th>
-              <th scope="col">Customer</th>
-              <th scope="col">Type and summary</th>
-              <th scope="col">Claimed</th>
-              <th scope="col">Status</th>
-            </tr>
-          </thead>
-          <tbody>
-            {claims.map((claim) => (
-              <tr key={claim.claim_id}>
-                <td data-label="Claim" className="mono claim-id">
-                  <button
-                    type="button"
-                    className="claim-link"
-                    aria-label={`View claim ${claim.claim_id}`}
-                    onClick={() => {
-                      onSelect(claim.claim_id);
-                    }}
-                  >
-                    {claim.claim_id}
-                  </button>
-                </td>
-                <td data-label="Customer" className="customer-name">
-                  {claim.customer_name}
-                </td>
-                <td data-label="Type and summary">
-                  <span className="claim-type">
-                    {formatClaimType(claim.claim_type)}
-                  </span>
-                  <span className="claim-summary">{claim.summary}</span>
-                </td>
-                <td data-label="Claimed" className="mono money">
-                  {formatMoney(claim.amount_claimed)}
-                </td>
-                <td data-label="Status">
-                  <StatusBadge status={claim.status} />
-                </td>
+        <div className="table-scroll">
+          <table>
+            <thead>
+              <tr>
+                <th scope="col">Claim</th>
+                <th scope="col">Customer</th>
+                <th scope="col">Type and summary</th>
+                <th scope="col">Claimed</th>
+                <th scope="col">Status</th>
               </tr>
-            ))}
-          </tbody>
-        </table>
-      </div>
-    </section>
+            </thead>
+            <tbody>
+              {claims.map((claim) => (
+                <tr key={claim.claim_id}>
+                  <td data-label="Claim" className="mono claim-id">
+                    <button
+                      type="button"
+                      className="claim-link"
+                      aria-label={`View claim ${claim.claim_id}`}
+                      onClick={() => {
+                        onSelect(claim.claim_id);
+                      }}
+                    >
+                      {claim.claim_id}
+                    </button>
+                  </td>
+                  <td data-label="Customer" className="customer-name">
+                    {claim.customer_name}
+                  </td>
+                  <td data-label="Type and summary">
+                    <span className="claim-type">
+                      {formatClaimType(claim.claim_type)}
+                    </span>
+                    <span className="claim-summary">{claim.summary}</span>
+                  </td>
+                  <td data-label="Claimed" className="mono money">
+                    {formatMoney(claim.amount_claimed)}
+                  </td>
+                  <td data-label="Status">
+                    <StatusBadge status={claim.status} />
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      </section>
+    </div>
   );
 }
 
 function InstructionsView() {
-  const [instructions, setInstructions] = useState("");
+  const [instructions, setInstructions] = useState({ queue: "", claim: "" });
   const [state, setState] = useState<"loading" | "ready" | "error">("loading");
 
   useEffect(() => {
@@ -107,7 +177,7 @@ function InstructionsView() {
     getInstructions()
       .then((data) => {
         if (active) {
-          setInstructions(data.content);
+          setInstructions(data);
           setState("ready");
         }
       })
@@ -133,7 +203,14 @@ function InstructionsView() {
       <p className="eyebrow">UnderCover Agent</p>
       <h1 id="instructions-title">Agent instructions</h1>
       <p>The current instructions are read only.</p>
-      <pre>{instructions}</pre>
+      <article>
+        <h2>Queue agent</h2>
+        <pre>{instructions.queue}</pre>
+      </article>
+      <article>
+        <h2>Claim agent</h2>
+        <pre>{instructions.claim}</pre>
+      </article>
     </section>
   );
 }

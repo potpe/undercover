@@ -12,4 +12,5 @@ it("labels every claim state", () => {
   expect(statusLabel("in_progress")).toBe("In progress");
   expect(statusLabel("waiting_for_sign_off")).toBe("Waiting for sign-off");
   expect(statusLabel("decided")).toBe("Decided");
+  expect(statusLabel("left_for_handler")).toBe("Left for handler");
 });

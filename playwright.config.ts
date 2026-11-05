@@ -5,7 +5,7 @@ export default defineConfig({
   outputDir: "e2e/test-results",
   workers: 1,
   reporter: "list",
-  use: { baseURL: "http://localhost:5173" },
+  use: { baseURL: "http://localhost:5174" },
   webServer: [
     {
       command: "node e2e/start-backend.ts",
@@ -13,8 +13,8 @@ export default defineConfig({
       reuseExistingServer: true,
     },
     {
-      command: "npx vite dashboard --port 5173 --strictPort",
-      url: "http://localhost:5173",
+      command: "npx vite dashboard --port 5174 --strictPort",
+      url: "http://localhost:5174",
       reuseExistingServer: true,
     },
   ],

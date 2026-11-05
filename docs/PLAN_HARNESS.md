@@ -126,12 +126,12 @@ Add a Sections read panel to the claim page and show the new Left for handler cl
 
 ### Success criteria
 
-- [ ] Vitest covers cap input validation, starting one queue run, to-do rendering and transitions, polling that stops on completion, all four to-do states, the final summary, errors and single-claim running with strict TypeScript and no `any`.
-- [ ] Component tests show ordered document sections on the claim page and separate queue/claim instructions without editing controls.
-- [ ] Playwright tests prepare run/to-do/document-read state through API calls or stub-driven backend tests, never a model, then verify the queue's live to-do panel, cap-five behavior, Left for handler state and claim sections in the real browser.
-- [ ] With the Playwright MCP browser, watch a stub-backed run move from an empty planning state to populated and completed to-dos; confirm claim statuses and results agree with the backend response.
-- [ ] Desktop and mobile browser checks at 1440 px and 390 px show readable to-dos, errors, document sections and both instruction sets, with keyboard-accessible controls and no horizontal overflow or console errors.
-- [ ] `npm run check:ts` and `npm run e2e` pass with Vitest coverage at least 80% and no model calls.
+- [x] Vitest covers cap input validation, starting one queue run, to-do rendering and transitions, polling that stops on completion, all four to-do states, the final summary, errors and single-claim running with strict TypeScript and no `any`.
+- [x] Component tests show ordered document sections on the claim page and separate queue/claim instructions without editing controls.
+- [x] Playwright tests prepare run/to-do/document-read state through API calls or stub-driven backend tests, never a model, then verify the queue's live to-do panel, cap-five behavior, Left for handler state and claim sections in the real browser.
+- [x] With the Playwright MCP browser, watch a stub-backed run move from an empty planning state to populated and completed to-dos; confirm claim statuses and results agree with the backend response.
+- [x] Desktop and mobile browser checks at 1440 px and 390 px show readable to-dos, errors, document sections and both instruction sets, with keyboard-accessible controls and no horizontal overflow or console errors.
+- [x] `npm run check:ts` and `npm run e2e` pass with Vitest coverage at least 80% and no model calls.
 
 ## Phase 6: Documentation, live five-claim run and full verification
 

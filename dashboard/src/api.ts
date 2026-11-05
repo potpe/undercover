@@ -1,5 +1,9 @@
 export type ClaimStatus =
-  "waiting" | "in_progress" | "waiting_for_sign_off" | "decided";
+  | "waiting"
+  | "in_progress"
+  | "waiting_for_sign_off"
+  | "decided"
+  | "left_for_handler";
 export type DecisionKind = "approve" | "decline" | "refer";
 
 export interface ClaimSummary {
@@ -107,6 +111,34 @@ export interface Activity {
   created_at: string;
 }
 
+export interface DocumentRead {
+  document: "policy_wording" | "claims_manual";
+  section_id: string;
+  title: string;
+}
+
+export interface RunTodo {
+  claim_id: string;
+  position: number;
+  status: "to_do" | "in_progress" | "done" | "left_for_handler";
+  attempts: number;
+  result: string | null;
+  error: string | null;
+}
+
+export interface AgentRun {
+  run_id: number;
+  thread_id: string;
+  claim_cap: number;
+  target_claim_id: string | null;
+  model_name: string | null;
+  status: "in_progress" | "completed" | "failed";
+  summary: string | null;
+  created_at: string;
+  completed_at: string | null;
+  todos: RunTodo[];
+}
+
 export interface ClaimBundle {
   claim: Claim;
   policy: Policy;
@@ -117,6 +149,7 @@ export interface ClaimBundle {
   paid_amount: number | null;
   signed_off_by: string | null;
   activity: Activity[];
+  documents_read: DocumentRead[];
 }
 
 export interface Handler {
@@ -155,8 +188,19 @@ export function getClaim(claimId: string): Promise<ClaimBundle> {
   return request<ClaimBundle>(`/api/claims/${claimId}`);
 }
 
-export function getInstructions(): Promise<{ content: string }> {
-  return request<{ content: string }>("/api/agent/instructions");
+export function getInstructions(): Promise<{ queue: string; claim: string }> {
+  return request<{ queue: string; claim: string }>("/api/agent/instructions");
+}
+
+export function getCurrentRun(): Promise<AgentRun | null> {
+  return request<AgentRun | null>("/api/runs/current");
+}
+
+export function createQueueRun(
+  claimCap: number,
+  threadId: string,
+): Promise<AgentRun> {
+  return postJson("/api/runs", { claim_cap: claimCap, thread_id: threadId });
 }
 
 export function listHandlers(): Promise<Handler[]> {

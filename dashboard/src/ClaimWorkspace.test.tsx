@@ -123,6 +123,18 @@ function makeBundle(
     paid_amount: null,
     signed_off_by: null,
     activity,
+    documents_read: [
+      {
+        document: "claims_manual",
+        section_id: "10",
+        title: "Meals without receipts",
+      },
+      {
+        document: "policy_wording",
+        section_id: "3",
+        title: "Trip Delay",
+      },
+    ],
   };
 }
 
@@ -195,6 +207,11 @@ it("shows the full claim, policy, customer history and activity", async () => {
     screen.getByText("Checked bag arrived 30 hours late in Lisbon"),
   ).toBeDefined();
   expect(screen.getByText("Agent run started")).toBeDefined();
+  expect(screen.getByText("Sections read")).toBeDefined();
+  expect(
+    screen.getByText("Claims manual 10: Meals without receipts"),
+  ).toBeDefined();
+  expect(screen.getByText("Policy wording 3: Trip Delay")).toBeDefined();
   expect(screen.getByRole("button", { name: "Run agent" })).toBeDefined();
 
   fireEvent.click(screen.getByRole("button", { name: "Back to queue" }));
