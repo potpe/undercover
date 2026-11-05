@@ -1,9 +1,9 @@
 import {
+  act,
   cleanup,
   fireEvent,
   render,
   screen,
-  waitFor,
 } from "@testing-library/react";
 import { afterEach, expect, it, vi } from "vitest";
 import type { ClaimBundle, ClaimStatus, DecisionKind } from "./api";
@@ -312,13 +312,15 @@ it("signs off and then records an over-limit payment", async () => {
   render(<ClaimWorkspace claimId="CLM-1001" onBack={vi.fn()} />);
 
   const selector = await screen.findByLabelText("Signing handler");
-  fireEvent.change(selector, { target: { value: "HND-01" } });
+  await screen.findByRole("option", { name: "Dana Whitfield" });
+  act(() => {
+    fireEvent.change(selector, { target: { value: "HND-01" } });
+  });
+  expect(selector).toHaveProperty("value", "HND-01");
   const signOffButton = screen.getByRole("button", {
     name: "Sign off and record payment",
   });
-  await waitFor(() => {
-    expect(signOffButton).toHaveProperty("disabled", false);
-  });
+  expect(signOffButton).toHaveProperty("disabled", false);
   fireEvent.click(signOffButton);
 
   expect(await screen.findByText("Payment recorded: $3,750.00")).toBeDefined();
