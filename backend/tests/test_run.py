@@ -10,8 +10,8 @@ def test_agent_instructions_are_served_read_only(client):
     response = client.get("/api/agent/instructions")
 
     assert response.status_code == 200
-    instructions = response.json()["content"]
-    assert instructions.startswith("You are the UnderCover Agent.")
+    instructions = response.json()["claim"]
+    assert instructions.startswith("You are the UnderCover claim agent.")
     assert "two or three sentences" in instructions
     assert "policy wording" in instructions
     assert "openai/gpt-6-luna" not in instructions

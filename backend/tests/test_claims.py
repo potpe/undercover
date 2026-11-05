@@ -66,13 +66,9 @@ def test_add_ons_are_resolved_for_the_policy(client):
     ]
 
 
-def test_policy_wording_and_handlers_are_available(client):
-    wording = client.get("/api/policy-wording")
+def test_handlers_are_available(client):
     handlers = client.get("/api/handlers")
 
-    assert wording.status_code == 200
-    assert wording.json()["version"] == "2026.1"
-    assert wording.json()["content"].startswith("# UnderCover Travel Insurance")
     assert [handler["name"] for handler in handlers.json()] == [
         "Dana Whitfield",
         "Marcus Oyelaran",

@@ -53,7 +53,38 @@ class ActivityRequest(BaseModel):
 
 
 class Instructions(BaseModel):
+    queue: str
+    claim: str
+
+
+class DocumentSearchRequest(BaseModel):
+    document: Literal["policy_wording", "claims_manual"]
+    query: str = Field(min_length=1)
+
+
+class DocumentSectionRequest(BaseModel):
+    document: Literal["policy_wording", "claims_manual"]
+    section_id: str = Field(min_length=1)
+
+
+class DocumentSectionSummary(BaseModel):
+    document: Literal["policy_wording", "claims_manual"]
+    section_id: str
+    title: str
+    snippet: str
+
+
+class DocumentSectionContent(BaseModel):
+    document: Literal["policy_wording", "claims_manual"]
+    section_id: str
+    title: str
     content: str
+
+
+class DocumentRead(BaseModel):
+    document: Literal["policy_wording", "claims_manual"]
+    section_id: str
+    title: str
 
 
 class Activity(BaseModel):
@@ -72,8 +103,4 @@ class ClaimBundle(BaseModel):
     paid_amount: float | None
     signed_off_by: str | None
     activity: list[Activity]
-
-
-class PolicyWording(BaseModel):
-    version: str
-    content: str
+    documents_read: list[DocumentRead]

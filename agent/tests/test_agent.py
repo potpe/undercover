@@ -19,77 +19,83 @@ def use_backend(monkeypatch):
     monkeypatch.setattr(main, "backend", lambda: TestClient(app))
 
 
-def test_read_claim_and_policy_wording_use_the_backend(client, monkeypatch):
+def tool_call(call_id, name, args):
+    return AIMessage(
+        content="", tool_calls=[{"name": name, "args": args, "id": call_id}]
+    )
+
+
+def test_claim_tools_use_section_level_backend_apis(client, monkeypatch):
     use_backend(monkeypatch)
 
     bundle = main.read_claim.invoke({"claim_id": "CLM-1001"})
-    wording = main.read_policy_wording.invoke({"claim_id": "CLM-1001"})
+    found = main.search_documents.invoke(
+        {
+            "claim_id": "CLM-1001",
+            "document": "claims_manual",
+            "query": "meals without receipts",
+        }
+    )
+    section = main.read_document_section.invoke(
+        {"claim_id": "CLM-1001", "document": "claims_manual", "section_id": "10"}
+    )
 
     assert bundle["claim"]["claim_id"] == "CLM-1001"
     assert bundle["policy"]["policy_id"] == "POL-2001"
-    assert wording["version"] == "2026.1"
-    messages = [
-        entry["message"]
-        for entry in client.get("/api/claims/CLM-1001").json()["activity"]
-    ]
-    assert messages == [
-        "Read claim, policy and customer claim history",
-        "Read policy wording 2026.1",
-    ]
+    assert found[0]["section_id"] == "10"
+    assert "$35 per traveler" in section["content"]
+    assert not hasattr(main, "read_policy_wording")
 
 
 def test_run_approves_and_pays_a_small_claim(client, monkeypatch):
     use_backend(monkeypatch)
     replies = [
-        AIMessage(
-            content="",
-            tool_calls=[
-                {"name": "read_claim", "args": {"claim_id": "CLM-1001"}, "id": "1"}
-            ],
+        tool_call("1", "read_claim", {"claim_id": "CLM-1001"}),
+        tool_call(
+            "2",
+            "search_documents",
+            {
+                "claim_id": "CLM-1001",
+                "document": "policy_wording",
+                "query": "trip delay",
+            },
         ),
-        AIMessage(
-            content="",
-            tool_calls=[
-                {
-                    "name": "read_policy_wording",
-                    "args": {"claim_id": "CLM-1001"},
-                    "id": "2",
-                }
-            ],
+        tool_call(
+            "3",
+            "read_document_section",
+            {
+                "claim_id": "CLM-1001",
+                "document": "policy_wording",
+                "section_id": "3",
+            },
         ),
-        AIMessage(
-            content="",
-            tool_calls=[
-                {
-                    "name": "record_claim_decision",
-                    "args": {
-                        "claim_id": "CLM-1001",
-                        "decision": "approve",
-                        "payout": 420.0,
-                        "reason": (
-                            "The airline canceled the flight and the delay exceeds "
-                            "Premium's waiting period. The documented meals, hotel and "
-                            "local transport are eligible extra costs."
-                        ),
-                        "policy_section": (
-                            "Section 3: Trip Delay; "
-                            "Section 10: How we work out your payment"
-                        ),
-                    },
-                    "id": "3",
-                }
-            ],
+        tool_call(
+            "4",
+            "read_document_section",
+            {
+                "claim_id": "CLM-1001",
+                "document": "claims_manual",
+                "section_id": "4",
+            },
         ),
-        AIMessage(
-            content="",
-            tool_calls=[
-                {
-                    "name": "pay_claim",
-                    "args": {"claim_id": "CLM-1001", "amount": 420.0},
-                    "id": "4",
-                }
-            ],
+        tool_call(
+            "5",
+            "record_claim_decision",
+            {
+                "claim_id": "CLM-1001",
+                "decision": "approve",
+                "payout": 420.0,
+                "reason": (
+                    "The airline canceled the flight and the delay exceeds Premium's "
+                    "waiting period. The documented meals, hotel and local transport "
+                    "are eligible extra costs."
+                ),
+                "policy_section": (
+                    "Section 3: Trip Delay; Section 10: How we work out your payment"
+                ),
+            },
         ),
+        tool_call("6", "pay_claim", {"claim_id": "CLM-1001", "amount": 420.0}),
         AIMessage(content="Claim CLM-1001 approved for $420.00."),
     ]
     monkeypatch.setattr(
@@ -108,53 +114,53 @@ def test_run_approves_and_pays_a_small_claim(client, monkeypatch):
     assert [entry["message"] for entry in bundle["activity"]] == [
         "Using model openrouter/free",
         "Read claim, policy and customer claim history",
-        "Read policy wording 2026.1",
+        "Read Policy wording section 3: Trip Delay",
+        "Read Claims manual section 4: Working a claim",
         "Decision recorded: approve for $420.00",
         "Payment recorded: $420.00",
     ]
+    assert [read["section_id"] for read in bundle["documents_read"]] == ["3", "4"]
 
 
 def test_run_leaves_an_over_limit_approval_for_sign_off(client, monkeypatch):
     use_backend(monkeypatch)
     replies = [
-        AIMessage(
-            content="",
-            tool_calls=[
-                {"name": "read_claim", "args": {"claim_id": "CLM-1003"}, "id": "1"}
-            ],
+        tool_call("1", "read_claim", {"claim_id": "CLM-1003"}),
+        tool_call(
+            "2",
+            "read_document_section",
+            {
+                "claim_id": "CLM-1003",
+                "document": "policy_wording",
+                "section_id": "7",
+            },
         ),
-        AIMessage(
-            content="",
-            tool_calls=[
-                {
-                    "name": "read_policy_wording",
-                    "args": {"claim_id": "CLM-1003"},
-                    "id": "2",
-                }
-            ],
+        tool_call(
+            "3",
+            "read_document_section",
+            {
+                "claim_id": "CLM-1003",
+                "document": "claims_manual",
+                "section_id": "6",
+            },
         ),
-        AIMessage(
-            content="",
-            tool_calls=[
-                {
-                    "name": "record_claim_decision",
-                    "args": {
-                        "claim_id": "CLM-1003",
-                        "decision": "approve",
-                        "payout": 3750.0,
-                        "reason": (
-                            "The sudden wrist fracture required emergency treatment "
-                            "during the covered trip. The $3,800.00 bill less the "
-                            "$50.00 Premium deductible gives a payout of $3,750.00."
-                        ),
-                        "policy_section": (
-                            "Section 7: Emergency Medical; "
-                            "Section 10: How we work out your payment"
-                        ),
-                    },
-                    "id": "3",
-                }
-            ],
+        tool_call(
+            "4",
+            "record_claim_decision",
+            {
+                "claim_id": "CLM-1003",
+                "decision": "approve",
+                "payout": 3750.0,
+                "reason": (
+                    "The sudden wrist fracture required emergency treatment during "
+                    "the covered trip. The $3,800.00 bill less the $50.00 Premium "
+                    "deductible gives a payout of $3,750.00."
+                ),
+                "policy_section": (
+                    "Section 7: Emergency Medical; "
+                    "Section 10: How we work out your payment"
+                ),
+            },
         ),
         AIMessage(content="Claim CLM-1003 approved pending handler sign-off."),
     ]
@@ -174,7 +180,7 @@ def test_run_leaves_an_over_limit_approval_for_sign_off(client, monkeypatch):
 def test_model_name(monkeypatch):
     monkeypatch.setenv("OPENROUTER_API_KEY", "test-key")
     monkeypatch.delenv("MODEL_NAME", raising=False)
-    assert main.model().model_name == "openai/gpt-6-luna"
+    assert main.model().model_name == "deepseek/deepseek-v4.1-flash"
     assert main.model().reasoning_effort == "low"
     monkeypatch.setenv("MODEL_NAME", "openrouter/free")
     assert main.model().model_name == "openrouter/free"

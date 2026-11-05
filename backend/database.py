@@ -5,6 +5,8 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
+from backend.documents import parse_sections, rank_sections
+
 ROOT = Path(__file__).resolve().parent.parent
 DATA_DIR = ROOT / "data"
 DEFAULT_DATABASE_PATH = ROOT / "backend" / "undercover.db"
@@ -71,8 +73,38 @@ def initialize_database() -> None:
                 message TEXT NOT NULL,
                 created_at TEXT NOT NULL
             );
+            CREATE TABLE IF NOT EXISTS document_sections (
+                document TEXT NOT NULL,
+                section_id TEXT NOT NULL,
+                title TEXT NOT NULL,
+                content TEXT NOT NULL,
+                PRIMARY KEY (document, section_id)
+            );
+            CREATE TABLE IF NOT EXISTS document_reads (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                claim_id TEXT NOT NULL,
+                document TEXT NOT NULL,
+                section_id TEXT NOT NULL,
+                title TEXT NOT NULL,
+                created_at TEXT NOT NULL,
+                UNIQUE (claim_id, document, section_id)
+            );
             """
         )
+        for document in ("policy_wording", "claims_manual"):
+            for section in parse_sections(document):
+                connection.execute(
+                    """
+                    INSERT OR IGNORE INTO document_sections
+                    (document, section_id, title, content) VALUES (?, ?, ?, ?)
+                    """,
+                    (
+                        section["document"],
+                        section["section_id"],
+                        section["title"],
+                        section["content"],
+                    ),
+                )
         if connection.execute("SELECT COUNT(*) FROM claims").fetchone()[0]:
             return
 
@@ -183,6 +215,13 @@ def get_claim_bundle(claim_id: str) -> dict[str, Any] | None:
         activity_rows = connection.execute(
             "SELECT * FROM activity WHERE claim_id = ? ORDER BY id", (claim_id,)
         ).fetchall()
+        document_rows = connection.execute(
+            """
+            SELECT document, section_id, title FROM document_reads
+            WHERE claim_id = ? ORDER BY id
+            """,
+            (claim_id,),
+        ).fetchall()
         policy = json.loads(policy_row["data"])
         plan_row = connection.execute(
             "SELECT data FROM plans WHERE plan = ?", (policy["plan"],)
@@ -224,6 +263,7 @@ def get_claim_bundle(claim_id: str) -> dict[str, Any] | None:
             }
             for activity in activity_rows
         ],
+        "documents_read": [dict(document) for document in document_rows],
     }
 
 
@@ -233,3 +273,54 @@ def list_handlers() -> list[dict[str, Any]]:
             "SELECT data FROM handlers ORDER BY handler_id"
         ).fetchall()
     return [json.loads(row["data"]) for row in rows]
+
+
+def search_document(document: str, query: str) -> list[dict[str, Any]]:
+    with connect() as connection:
+        rows = connection.execute(
+            "SELECT * FROM document_sections WHERE document = ?", (document,)
+        ).fetchall()
+    return rank_sections([dict(row) for row in rows], query)
+
+
+def read_document_section(
+    claim_id: str, document: str, section_id: str
+) -> dict[str, Any] | None:
+    with connect() as connection:
+        row = connection.execute(
+            """
+            SELECT * FROM document_sections
+            WHERE document = ? AND section_id = ?
+            """,
+            (document, section_id),
+        ).fetchone()
+        if row is None:
+            return None
+        inserted = connection.execute(
+            """
+            INSERT OR IGNORE INTO document_reads
+            (claim_id, document, section_id, title, created_at) VALUES (?, ?, ?, ?, ?)
+            """,
+            (
+                claim_id,
+                document,
+                section_id,
+                row["title"],
+                datetime.now(UTC).isoformat(),
+            ),
+        )
+        if inserted.rowcount:
+            label = (
+                "Policy wording" if document == "policy_wording" else "Claims manual"
+            )
+            insert_activity(
+                connection,
+                claim_id,
+                f"Read {label} section {section_id}: {row['title']}",
+            )
+        return {
+            "document": row["document"],
+            "section_id": row["section_id"],
+            "title": row["title"],
+            "content": row["content"],
+        }

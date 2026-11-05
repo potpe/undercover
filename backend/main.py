@@ -9,21 +9,25 @@ from fastapi import BackgroundTasks, FastAPI, HTTPException
 
 from agent.main import run as agent_run
 from backend.database import (
-    DATA_DIR,
     add_activity,
     get_claim_bundle,
     initialize_database,
     list_claims,
     list_handlers,
+    read_document_section,
+    search_document,
 )
 from backend.models import (
     ActivityRequest,
     ClaimBundle,
     ClaimSummary,
     DecisionRequest,
+    DocumentSearchRequest,
+    DocumentSectionContent,
+    DocumentSectionRequest,
+    DocumentSectionSummary,
     Instructions,
     PaymentRequest,
-    PolicyWording,
     RunRequest,
     RunResponse,
     SignOffRequest,
@@ -117,22 +121,44 @@ def activity(claim_id: str, request: ActivityRequest) -> ClaimBundle:
     return claim(claim_id)
 
 
+@app.post(
+    "/api/claims/{claim_id}/document-search", operation_id="search_claim_documents"
+)
+def document_search(
+    claim_id: str, request: DocumentSearchRequest
+) -> list[DocumentSectionSummary]:
+    """Search policy or manual sections relevant to a claim."""
+    if get_claim_bundle(claim_id) is None:
+        raise HTTPException(status_code=404, detail="Claim not found")
+    return [
+        DocumentSectionSummary(**section)
+        for section in search_document(request.document, request.query)
+    ]
+
+
+@app.post("/api/claims/{claim_id}/document-section", operation_id="read_claim_document")
+def document_section(
+    claim_id: str, request: DocumentSectionRequest
+) -> DocumentSectionContent:
+    """Read and record one policy or manual section for a claim."""
+    if get_claim_bundle(claim_id) is None:
+        raise HTTPException(status_code=404, detail="Claim not found")
+    section = read_document_section(claim_id, request.document, request.section_id)
+    if section is None:
+        raise HTTPException(status_code=404, detail="Document section not found")
+    return DocumentSectionContent(**section)
+
+
 @app.get("/api/agent/instructions", operation_id="get_agent_instructions")
 def agent_instructions() -> Instructions:
-    """Return the UnderCover Agent's read-only instructions."""
-    content = (
+    """Return the queue and claim agents' read-only instructions."""
+    queue = (
+        Path(__file__).with_name("queue_instructions.md").read_text(encoding="utf-8")
+    )
+    claim_text = (
         Path(__file__).with_name("agent_instructions.md").read_text(encoding="utf-8")
     )
-    return Instructions(content=content)
-
-
-@app.get("/api/policy-wording", operation_id="get_policy_wording")
-def policy_wording() -> PolicyWording:
-    """Return the policy wording used for claim decisions."""
-    return PolicyWording(
-        version="2026.1",
-        content=(DATA_DIR / "policy_wording.md").read_text(encoding="utf-8"),
-    )
+    return Instructions(queue=queue, claim=claim_text)
 
 
 @app.get("/api/handlers", operation_id="list_handlers")
