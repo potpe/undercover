@@ -80,6 +80,11 @@ def test_run_approves_and_pays_a_small_claim(client, monkeypatch):
         ),
         tool_call(
             "5",
+            "calculate_total",
+            {"claim_id": "CLM-1001", "amounts": [245.0, 95.0, 80.0]},
+        ),
+        tool_call(
+            "6",
             "record_claim_decision",
             {
                 "claim_id": "CLM-1001",
@@ -95,7 +100,7 @@ def test_run_approves_and_pays_a_small_claim(client, monkeypatch):
                 ),
             },
         ),
-        tool_call("6", "pay_claim", {"claim_id": "CLM-1001", "amount": 420.0}),
+        tool_call("7", "pay_claim", {"claim_id": "CLM-1001", "amount": 420.0}),
         AIMessage(content="Claim CLM-1001 approved for $420.00."),
     ]
     monkeypatch.setattr(
@@ -116,6 +121,7 @@ def test_run_approves_and_pays_a_small_claim(client, monkeypatch):
         "Read claim, policy and customer claim history",
         "Read Policy wording section 3: Trip Delay",
         "Read Claims manual section 4: Working a claim",
+        "Calculated eligible expense total: $420.00",
         "Decision recorded: approve for $420.00",
         "Payment recorded: $420.00",
     ]

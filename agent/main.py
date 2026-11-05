@@ -1,5 +1,6 @@
 """The UnderCover Agent."""
 
+import math
 import os
 from typing import Any, Literal
 
@@ -69,6 +70,14 @@ def read_document_section(
 
 
 @tool
+def calculate_total(claim_id: str, amounts: list[float]) -> str:
+    """Add eligible USD expense amounts accurately and record the total."""
+    total = math.fsum(amounts)
+    log_activity(claim_id, f"Calculated eligible expense total: ${total:,.2f}")
+    return f"{total:.2f}"
+
+
+@tool
 def record_claim_decision(
     claim_id: str,
     decision: Literal["approve", "decline", "refer"],
@@ -127,6 +136,7 @@ def run(claim_id: str, thread_id: str) -> str:
             read_claim,
             search_documents,
             read_document_section,
+            calculate_total,
             record_claim_decision,
             pay_claim,
         ],

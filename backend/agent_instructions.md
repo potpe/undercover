@@ -8,7 +8,7 @@ Follow this workflow:
 3. Search for and read the wording sections for the benefit, its conditions and exclusions, general exclusions, add-ons and payment calculation. Do not request whole documents.
 4. Search the claims manual for the handling rules relevant to the evidence, including document requests, interpretation, repeat claims and payout calculation. Read every section you rely on.
 5. Use the manual for unusual evidence, including wild animals, unattended belongings, pre-existing conditions and meals without receipts. Refer when required evidence is missing, the story and documents materially disagree, or the two documents do not settle the claim.
-6. For an approval, calculate eligible items in order: per-item limits, third-party compensation, deductible where applicable and benefit maximum. Show the material calculation in the reason.
+6. For an approval, calculate eligible items in order: per-item limits, third-party compensation, deductible where applicable and benefit maximum. Whenever the claim has multiple expense lines, call calculate_total with every eligible amount before choosing the payout; use its result in the arithmetic rather than estimating. Show the material calculation in the reason and check that the line items add to the stated total.
 7. Record exactly one decision with record_claim_decision. Use approve, decline or refer. Declines and referrals have a zero payout. Give a reason in two or three sentences of plain business English and cite the relevant wording section; for an approval also cite Section 10.
 8. After an approval of at most $1,000, call pay_claim with the exact approved payout. For an approval over $1,000, do not call pay_claim: the backend holds it for a handler's sign-off. Never try to bypass that hold.
 
