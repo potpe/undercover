@@ -141,12 +141,12 @@ For the live check, reseed first and temporarily remove `MODEL_NAME` from `.env`
 
 ### Success criteria
 
-- [ ] The three product documents match the implemented behavior, including the manual, model default/override, run caps, failure handling and test commands; `docs/PLAN.md` remains unchanged.
-- [ ] A final code/data-path review finds no direct agent reads of business files, no use of `data/evals/`, no held-out claims in the queue, no real payments or customer messages, and no additional agent framework.
-- [ ] After reseeding, one real queue run capped at five on `deepseek/deepseek-v4.1-flash` processes exactly five claims and ends with a summary; the other 20 remain waiting, no claim is decided or paid twice, and no claim remains in progress.
-- [ ] During that live run, the Playwright MCP browser shows the to-do list filling and updating, the selected model, each claim's activity and sections read, and any sign-off or handler state correctly.
-- [ ] The final browser check covers queue, current run, full claim, sections read and both instruction sets with no console errors.
-- [ ] From a clean test-server start, `npm run check` passes Ruff, Pyright, pytest, Prettier, ESLint, tsc, Vitest and all Playwright tests; both coverage reports remain at least 80%, and automated tests make no model calls.
+- [x] The three product documents match the implemented behavior, including the manual, model default/override, run caps, failure handling and test commands; `docs/PLAN.md` remains unchanged.
+- [x] A final code/data-path review finds no direct agent reads of business files, no use of `data/evals/`, no held-out claims in the queue, no real payments or customer messages, and no additional agent framework.
+- [x] After reseeding, one real queue run capped at five on `deepseek/deepseek-v4.1-flash` processes exactly five claims and ends with a summary; the other 20 remain waiting, no claim is decided or paid twice, and no claim remains in progress.
+- [x] During that live run, the Playwright MCP browser shows the to-do list filling and updating, the selected model, each claim's activity and sections read, and any sign-off or handler state correctly.
+- [x] The final browser check covers queue, current run, full claim, sections read and both instruction sets with no console errors.
+- [x] From a clean test-server start, `npm run check` passes Ruff, Pyright, pytest, Prettier, ESLint, tsc, Vitest and all Playwright tests; both coverage reports remain at least 80%, and automated tests make no model calls.
 
 ## Build checkpoints
 
