@@ -147,6 +147,10 @@ def test_two_failures_leave_claim_for_handler_without_third_attempt(
     assert len(calls) == 2
     assert client.get("/api/claims/CLM-1001").json()["paid_amount"] is None
 
+    queue = client.get("/api/claims")
+    assert queue.status_code == 200
+    assert queue.json()[0]["status"] == "left_for_handler"
+
 
 def test_failure_does_not_change_another_claim(client, monkeypatch):
     run = client.post("/api/runs", json={"thread_id": "work", "claim_cap": 2}).json()

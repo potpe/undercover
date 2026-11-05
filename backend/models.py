@@ -2,7 +2,9 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, Field
 
-ClaimStatus = Literal["waiting", "in_progress", "waiting_for_sign_off", "decided"]
+ClaimStatus = Literal[
+    "waiting", "in_progress", "waiting_for_sign_off", "decided", "left_for_handler"
+]
 DecisionKind = Literal["approve", "decline", "refer"]
 
 
