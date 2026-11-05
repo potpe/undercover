@@ -1,10 +1,13 @@
 import sqlite3
+from collections.abc import Callable
 from datetime import UTC, datetime
 from typing import Any
 
 from fastapi import HTTPException
 
-from backend.database import connect
+from backend.database import connect, insert_activity
+from backend.models import PaymentRequest
+from backend.workflow import record_payment
 
 
 def now() -> str:
@@ -179,3 +182,134 @@ def finish_run(run_id: int, summary: str) -> dict[str, Any]:
             (summary, now(), run_id),
         )
     return require_run(run_id)
+
+
+def work_outcome(run_id: int, todo: sqlite3.Row, status: str | None = None):
+    return {
+        "run_id": run_id,
+        "claim_id": todo["claim_id"],
+        "status": status or todo["status"],
+        "attempts": todo["attempts"],
+        "result": todo["result"],
+    }
+
+
+def claim_result(claim: sqlite3.Row) -> str:
+    return f"{claim['claim_id']}: {claim['decision']} ${claim['payout']:,.2f}"
+
+
+def complete_work(run_id: int, claim_id: str, result: str):
+    with connect() as connection:
+        connection.execute(
+            """
+            UPDATE run_todos SET status = 'done', result = ?, error = NULL
+            WHERE run_id = ? AND claim_id = ?
+            """,
+            (result, run_id, claim_id),
+        )
+        todo = connection.execute(
+            "SELECT * FROM run_todos WHERE run_id = ? AND claim_id = ?",
+            (run_id, claim_id),
+        ).fetchone()
+        return work_outcome(run_id, todo)
+
+
+def fail_work(run_id: int, claim_id: str, error: str):
+    with connect() as connection:
+        todo = connection.execute(
+            "SELECT * FROM run_todos WHERE run_id = ? AND claim_id = ?",
+            (run_id, claim_id),
+        ).fetchone()
+        attempts = todo["attempts"] + 1
+        todo_status = "to_do" if attempts == 1 else "left_for_handler"
+        claim_status = "waiting" if attempts == 1 else "left_for_handler"
+        connection.execute(
+            "UPDATE claims SET status = ? WHERE claim_id = ?", (claim_status, claim_id)
+        )
+        connection.execute(
+            """
+            UPDATE run_todos SET status = ?, attempts = ?, result = ?, error = ?
+            WHERE run_id = ? AND claim_id = ?
+            """,
+            (todo_status, attempts, error, error, run_id, claim_id),
+        )
+        insert_activity(connection, claim_id, f"Attempt {attempts} failed: {error}")
+        todo = connection.execute(
+            "SELECT * FROM run_todos WHERE run_id = ? AND claim_id = ?",
+            (run_id, claim_id),
+        ).fetchone()
+        outcome_status = "retry" if attempts == 1 else "left_for_handler"
+        return work_outcome(run_id, todo, outcome_status)
+
+
+def selected_work(connection: sqlite3.Connection, run_id: int, claim_id: str):
+    run = connection.execute(
+        "SELECT * FROM runs WHERE run_id = ?", (run_id,)
+    ).fetchone()
+    if run is None:
+        raise HTTPException(status_code=404, detail="Run not found")
+    todo = connection.execute(
+        "SELECT * FROM run_todos WHERE run_id = ? AND claim_id = ?",
+        (run_id, claim_id),
+    ).fetchone()
+    claim = connection.execute(
+        "SELECT * FROM claims WHERE claim_id = ?", (claim_id,)
+    ).fetchone()
+    if todo is None or claim is None:
+        raise HTTPException(status_code=404, detail="Claim is not in this run")
+    return todo, claim
+
+
+def work_claim(
+    run_id: int, claim_id: str, runner: Callable[[str, str], str]
+) -> dict[str, Any]:
+    with connect() as connection:
+        todo, claim = selected_work(connection, run_id, claim_id)
+        if todo["status"] in ("done", "left_for_handler"):
+            return work_outcome(run_id, todo)
+        if claim["status"] in ("decided", "waiting_for_sign_off"):
+            return complete_work(run_id, claim_id, claim_result(claim))
+        if todo["status"] == "in_progress" or claim["status"] != "waiting":
+            raise HTTPException(status_code=409, detail="Claim is already being worked")
+        attempt = todo["attempts"] + 1
+        connection.execute(
+            "UPDATE claims SET status = 'in_progress' WHERE claim_id = ?", (claim_id,)
+        )
+        connection.execute(
+            """
+            UPDATE run_todos SET status = 'in_progress', error = NULL
+            WHERE run_id = ? AND claim_id = ?
+            """,
+            (run_id, claim_id),
+        )
+
+    reply = None
+    error = None
+    try:
+        reply = runner(claim_id, f"{run_id}:{claim_id}:attempt-{attempt}")
+    except Exception as caught:
+        error = str(caught)
+
+    with connect() as connection:
+        claim = connection.execute(
+            "SELECT * FROM claims WHERE claim_id = ?", (claim_id,)
+        ).fetchone()
+    if (
+        claim["status"] == "in_progress"
+        and claim["decision"] == "approve"
+        and claim["paid_amount"] is None
+    ):
+        try:
+            record_payment(claim_id, PaymentRequest(amount=claim["payout"]))
+        except Exception as caught:
+            error = str(caught)
+        with connect() as connection:
+            claim = connection.execute(
+                "SELECT * FROM claims WHERE claim_id = ?", (claim_id,)
+            ).fetchone()
+    if claim["status"] in ("decided", "waiting_for_sign_off"):
+        result = " ".join((reply or claim_result(claim)).split())
+        return complete_work(run_id, claim_id, result)
+    return fail_work(
+        run_id, claim_id, error or "Agent finished without recording a decision"
+    )

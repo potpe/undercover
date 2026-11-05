@@ -63,6 +63,18 @@ class FinishRunRequest(BaseModel):
     summary: str = Field(min_length=1)
 
 
+class WorkRequest(BaseModel):
+    claim_id: str = Field(min_length=1)
+
+
+class WorkOutcome(BaseModel):
+    run_id: int
+    claim_id: str
+    status: Literal["retry", "done", "left_for_handler"]
+    attempts: int
+    result: str
+
+
 class RunTodo(BaseModel):
     claim_id: str
     position: int

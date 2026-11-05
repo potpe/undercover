@@ -35,6 +35,8 @@ from backend.models import (
     RunRequest,
     RunResponse,
     SignOffRequest,
+    WorkOutcome,
+    WorkRequest,
 )
 from backend.runs import (
     create_run as create_agent_run,
@@ -44,6 +46,7 @@ from backend.runs import (
     finish_run,
     get_run,
     save_plan,
+    work_claim,
 )
 from backend.workflow import (
     fail_run,
@@ -152,6 +155,12 @@ def get_agent_run(run_id: int) -> AgentRun:
 def plan_agent_run(run_id: int, request: RunPlanRequest) -> AgentRun:
     """Save an agent-selected ordered plan within the run cap."""
     return AgentRun(**save_plan(run_id, request.claim_ids, request.model_name))
+
+
+@app.post("/api/runs/{run_id}/work", operation_id="work_run_claim")
+def work_run_claim(run_id: int, request: WorkRequest) -> WorkOutcome:
+    """Work one selected claim with a fresh claim subagent."""
+    return WorkOutcome(**work_claim(run_id, request.claim_id, agent_run))
 
 
 @app.post("/api/runs/{run_id}/finish", operation_id="finish_agent_run")

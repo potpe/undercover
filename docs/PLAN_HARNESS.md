@@ -94,14 +94,14 @@ Connect selected to-do items to the existing claim agent, creating a fresh `crea
 
 ### Success criteria
 
-- [ ] A stub-model test works one claim through claim read, targeted wording/manual section reads, decision and permitted payment; its result is one line, its to-do is `done`, and a second claim agent starts with only its own claim message.
-- [ ] An approval over $1,000 marks the to-do `done` while the claim remains `waiting_for_sign_off` and unpaid; the existing backend payment guard still returns 409 before sign-off.
-- [ ] A stub provider exception on attempt one returns a retry outcome, records the error, leaves the claim `waiting`, sets the to-do back to `to_do`, and does not raise out of the work tool.
-- [ ] Calling work again uses a fresh subagent and a new attempt-specific thread id; success after that retry marks the item `done` with no duplicate decision or payment.
-- [ ] Two failed attempts leave the claim and to-do `left_for_handler`, with the second error visible and no decision or payment. A third work call does not invoke a model.
-- [ ] A failure on one claim does not change any other claim or to-do, and repeating a completed work call returns the stored result without another model call.
-- [ ] Tests cover interruption after a decision without creating a second decision or payment, and no failure path leaves a claim `in_progress`.
-- [ ] `npm run check:python` passes with stub models only and at least 80% coverage.
+- [x] A stub-model test works one claim through claim read, targeted wording/manual section reads, decision and permitted payment; its result is one line, its to-do is `done`, and a second claim agent starts with only its own claim message.
+- [x] An approval over $1,000 marks the to-do `done` while the claim remains `waiting_for_sign_off` and unpaid; the existing backend payment guard still returns 409 before sign-off.
+- [x] A stub provider exception on attempt one returns a retry outcome, records the error, leaves the claim `waiting`, sets the to-do back to `to_do`, and does not raise out of the work tool.
+- [x] Calling work again uses a fresh subagent and a new attempt-specific thread id; success after that retry marks the item `done` with no duplicate decision or payment.
+- [x] Two failed attempts leave the claim and to-do `left_for_handler`, with the second error visible and no decision or payment. A third work call does not invoke a model.
+- [x] A failure on one claim does not change any other claim or to-do, and repeating a completed work call returns the stored result without another model call.
+- [x] Tests cover interruption after a decision without creating a second decision or payment, and no failure path leaves a claim `in_progress`.
+- [x] `npm run check:python` passes with stub models only and at least 80% coverage.
 
 ## Phase 4: Queue-agent orchestration and completion check
 

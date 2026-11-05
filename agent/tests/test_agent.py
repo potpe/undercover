@@ -177,6 +177,27 @@ def test_run_leaves_an_over_limit_approval_for_sign_off(client, monkeypatch):
     assert blocked.status_code == 409
 
 
+def test_each_claim_run_starts_with_only_its_own_message(client, monkeypatch):
+    use_backend(monkeypatch)
+    invocations = []
+
+    class FreshAgent:
+        def invoke(self, inputs, config):
+            invocations.append(inputs["messages"])
+            return {"messages": [AIMessage(content="Done")]}
+
+    monkeypatch.setattr(main, "model", lambda: StubModel(messages=iter([])))
+    monkeypatch.setattr(main, "create_agent", lambda *args, **kwargs: FreshAgent())
+
+    main.run("CLM-1001", "fresh-1")
+    main.run("CLM-1002", "fresh-2")
+
+    assert invocations == [
+        [{"role": "user", "content": "Work claim CLM-1001"}],
+        [{"role": "user", "content": "Work claim CLM-1002"}],
+    ]
+
+
 def test_model_name(monkeypatch):
     monkeypatch.setenv("OPENROUTER_API_KEY", "test-key")
     monkeypatch.delenv("MODEL_NAME", raising=False)
