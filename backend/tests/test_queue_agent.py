@@ -71,6 +71,19 @@ def use_queue_stub(client, monkeypatch, plan_ids, work_ids, early_finish=False):
     monkeypatch.setattr(main, "agent_run", settle)
 
 
+def test_list_claims_exposes_the_run_cap_and_target(client, monkeypatch):
+    monkeypatch.setattr(main, "execute_queue_run", lambda run_id, thread_id: None)
+    created = client.post("/api/runs", json={"thread_id": "cap", "claim_cap": 5})
+    run_id = created.json()["run_id"]
+    monkeypatch.setattr(queue_agent, "backend", lambda: TestClient(app))
+
+    result = queue_agent.queue_tools(run_id, "stub-model")[0].invoke({})
+
+    assert result["claim_cap"] == 5
+    assert result["target_claim_id"] is None
+    assert len(result["claims"]) == 25
+
+
 def test_queue_agent_works_five_in_its_chosen_order(client, monkeypatch):
     ids = ["CLM-1005", "CLM-1002", "CLM-1004", "CLM-1001", "CLM-1003"]
     use_queue_stub(client, monkeypatch, ids, ids)
@@ -193,6 +206,34 @@ def test_finish_rejects_a_missed_claim_then_allows_completion(client, monkeypatc
     assert [todo["status"] for todo in run["todos"]] == ["done", "done"]
     waiting_outside_cap = client.get("/api/claims/CLM-1003").json()["claim"]["status"]
     assert waiting_outside_cap == "waiting"
+
+
+def test_queue_agent_can_correct_a_rejected_plan(client, monkeypatch):
+    messages = [
+        call("list", "list_claims"),
+        call("bad-plan", "plan_todos", {"claim_ids": ["CLM-1001", "CLM-1002"]}),
+        call("good-plan", "plan_todos", {"claim_ids": ["CLM-1001"]}),
+        call("work", "work_claim", {"claim_id": "CLM-1001"}),
+        call("check", "check_todos"),
+        call(
+            "finish",
+            "finish_run",
+            {"summary": "1 claim handled: 1 done, 0 left for handler."},
+        ),
+        AIMessage(content="Run complete"),
+    ]
+    monkeypatch.setattr(queue_agent, "backend", lambda: TestClient(app))
+    monkeypatch.setattr(
+        queue_agent, "model", lambda: StubModel(messages=iter(messages))
+    )
+    monkeypatch.setattr(main, "agent_run", settle)
+
+    client.post("/api/runs", json={"thread_id": "corrected", "claim_cap": 1})
+
+    run = client.get("/api/runs/current").json()
+    assert run["status"] == "completed"
+    assert len(run["todos"]) == 1
+    assert run["todos"][0]["status"] == "done"
 
 
 def test_duplicate_finish_does_not_change_the_run(client, monkeypatch):

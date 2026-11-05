@@ -11,7 +11,7 @@ from agent.main import backend, model
 
 def queue_tools(run_id: int, model_name: str):
     @tool
-    def list_claims() -> list[dict[str, Any]]:
+    def list_claims() -> dict[str, Any]:
         """List waiting claims eligible for this run, including its cap and target."""
         with backend() as client:
             run_response = client.get(f"/api/runs/{run_id}")
@@ -27,15 +27,19 @@ def queue_tools(run_id: int, model_name: str):
                 for claim in waiting
                 if claim["claim_id"] == run["target_claim_id"]
             ]
-        return [
-            {
-                "claim_id": claim["claim_id"],
-                "customer_name": claim["customer_name"],
-                "claim_type": claim["claim_type"],
-                "summary": claim["summary"],
-            }
-            for claim in waiting
-        ]
+        return {
+            "claim_cap": run["claim_cap"],
+            "target_claim_id": run["target_claim_id"],
+            "claims": [
+                {
+                    "claim_id": claim["claim_id"],
+                    "customer_name": claim["customer_name"],
+                    "claim_type": claim["claim_type"],
+                    "summary": claim["summary"],
+                }
+                for claim in waiting
+            ],
+        }
 
     @tool
     def plan_todos(claim_ids: list[str]) -> dict[str, Any]:
@@ -45,6 +49,8 @@ def queue_tools(run_id: int, model_name: str):
                 f"/api/runs/{run_id}/plan",
                 json={"claim_ids": claim_ids, "model_name": model_name},
             )
+        if response.status_code == HTTPStatus.CONFLICT:
+            return response.json()
         response.raise_for_status()
         return response.json()
 
