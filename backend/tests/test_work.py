@@ -1,6 +1,13 @@
+import pytest
+
 from backend import main
 from backend.models import DecisionRequest, PaymentRequest
 from backend.workflow import record_decision, record_payment
+
+
+@pytest.fixture(autouse=True)
+def defer_queue_agent(monkeypatch):
+    monkeypatch.setattr(main, "execute_queue_run", lambda run_id, thread_id: None)
 
 
 def planned_run(client, claim_id="CLM-1001"):

@@ -184,6 +184,23 @@ def finish_run(run_id: int, summary: str) -> dict[str, Any]:
     return require_run(run_id)
 
 
+def fail_queue_run(run_id: int, error: str) -> None:
+    run = get_run(run_id)
+    if run is None or run["status"] != "in_progress":
+        return
+    for todo in run["todos"]:
+        if todo["status"] == "in_progress":
+            fail_work(run_id, todo["claim_id"], error)
+    with connect() as connection:
+        connection.execute(
+            """
+            UPDATE runs SET status = 'failed', summary = ?, completed_at = ?
+            WHERE run_id = ?
+            """,
+            (error, now(), run_id),
+        )
+
+
 def work_outcome(run_id: int, todo: sqlite3.Row, status: str | None = None):
     return {
         "run_id": run_id,

@@ -8,6 +8,7 @@ from typing import Any
 from fastapi import BackgroundTasks, FastAPI, HTTPException
 
 from agent.main import run as agent_run
+from agent.queue import run as queue_agent_run
 from backend.database import (
     add_activity,
     get_claim_bundle,
@@ -43,18 +44,13 @@ from backend.runs import (
 )
 from backend.runs import (
     current_run,
+    fail_queue_run,
     finish_run,
     get_run,
     save_plan,
     work_claim,
 )
-from backend.workflow import (
-    fail_run,
-    record_decision,
-    record_payment,
-    sign_off,
-    start_run,
-)
+from backend.workflow import record_decision, record_payment, sign_off
 
 
 @asynccontextmanager
@@ -66,14 +62,14 @@ async def lifespan(_: FastAPI) -> AsyncIterator[None]:
 app = FastAPI(title="UnderCover", lifespan=lifespan)
 
 
-def execute_run(claim_id: str, thread_id: str) -> None:
+def execute_queue_run(run_id: int, thread_id: str) -> None:
     try:
-        agent_run(claim_id, thread_id)
-        bundle = get_claim_bundle(claim_id)
-        if bundle and bundle["decision"] is None:
-            raise RuntimeError("Agent finished without recording a decision")
+        queue_agent_run(run_id, thread_id)
+        run = get_run(run_id)
+        if run and run["status"] == "in_progress":
+            raise RuntimeError("Queue agent finished without completing the run")
     except Exception as error:
-        fail_run(claim_id, error)
+        fail_queue_run(run_id, str(error))
 
 
 @app.get("/api/health", operation_id="health")
@@ -124,15 +120,16 @@ def run_claim(
 ) -> RunResponse:
     """Start the UnderCover Agent on a waiting claim."""
     run = create_agent_run(request.thread_id, 1, claim_id)
-    start_run(claim_id)
-    background_tasks.add_task(execute_run, claim_id, request.thread_id)
+    background_tasks.add_task(execute_queue_run, run["run_id"], request.thread_id)
     return RunResponse(run_id=run["run_id"], claim_id=claim_id, status="in_progress")
 
 
 @app.post("/api/runs", operation_id="create_queue_run", status_code=202)
-def queue_run(request: QueueRunRequest) -> AgentRun:
-    """Create a capped queue run for the UnderCover Agent."""
-    return AgentRun(**create_agent_run(request.thread_id, request.claim_cap))
+def queue_run(request: QueueRunRequest, background_tasks: BackgroundTasks) -> AgentRun:
+    """Start a capped queue run for the UnderCover Agent."""
+    run = create_agent_run(request.thread_id, request.claim_cap)
+    background_tasks.add_task(execute_queue_run, run["run_id"], request.thread_id)
+    return AgentRun(**run)
 
 
 @app.get("/api/runs/current", operation_id="get_current_run")

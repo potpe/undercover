@@ -109,14 +109,14 @@ Add the queue agent using the same LangChain stack and its API-only planning, wo
 
 ### Success criteria
 
-- [ ] A five-claim stub-model run plans five claims, delegates each to a fresh claim subagent, updates every to-do and finishes with a short stored summary; the other 20 claims remain `waiting`.
-- [ ] An uncapped trial using cap 25 works every waiting claim, while the agent rather than a Python loop chooses the to-do order through its plan tool.
-- [ ] A named-claim run works only the requested claim and completes with one done to-do; decided, in-progress and left-for-handler targets return 409.
-- [ ] In a mixed stub run, the first claim fails and retries or moves to a handler without stopping the remaining claims from being worked.
-- [ ] A stub run that tries to finish with a selected claim still `to_do` receives 409, remains `in_progress`, and can finish only after the missed claim is worked or left for a handler. Claims outside the cap correctly remain waiting without blocking completion.
-- [ ] Duplicate plan/work/finish calls cannot decide or pay a claim twice, and a failed queue run never leaves an undecided claim `in_progress`.
-- [ ] The current run response exposes the actual default or override model and a final summary containing counts for done and left-for-handler items.
-- [ ] `npm run check:python` passes all orchestration tests with no real model calls and at least 80% coverage.
+- [x] A five-claim stub-model run plans five claims, delegates each to a fresh claim subagent, updates every to-do and finishes with a short stored summary; the other 20 claims remain `waiting`.
+- [x] An uncapped trial using cap 25 works every waiting claim, while the agent rather than a Python loop chooses the to-do order through its plan tool.
+- [x] A named-claim run works only the requested claim and completes with one done to-do; decided, in-progress and left-for-handler targets return 409.
+- [x] In a mixed stub run, the first claim fails and retries or moves to a handler without stopping the remaining claims from being worked.
+- [x] A stub run that tries to finish with a selected claim still `to_do` receives 409, remains `in_progress`, and can finish only after the missed claim is worked or left for a handler. Claims outside the cap correctly remain waiting without blocking completion.
+- [x] Duplicate plan/work/finish calls cannot decide or pay a claim twice, and a failed queue run never leaves an undecided claim `in_progress`.
+- [x] The current run response exposes the actual default or override model and a final summary containing counts for done and left-for-handler items.
+- [x] `npm run check:python` passes all orchestration tests with no real model calls and at least 80% coverage.
 
 ## Phase 5: Live to-do list, run controls and document visibility
 

@@ -90,7 +90,7 @@ class AgentRun(BaseModel):
     claim_cap: int
     target_claim_id: str | None
     model_name: str | None
-    status: Literal["in_progress", "completed"]
+    status: Literal["in_progress", "completed", "failed"]
     summary: str | None
     created_at: str
     completed_at: str | None

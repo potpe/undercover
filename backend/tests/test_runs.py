@@ -1,5 +1,12 @@
+import pytest
+
 from backend import main
 from backend.database import connect
+
+
+@pytest.fixture(autouse=True)
+def defer_queue_agent(monkeypatch):
+    monkeypatch.setattr(main, "execute_queue_run", lambda run_id, thread_id: None)
 
 
 def create_run(client, cap=5, thread_id="thread-queue"):

@@ -1,6 +1,6 @@
 # Status
 
-The harness build is in progress. Phases 1 through 3 are complete.
+The harness build is in progress. Phases 1 through 4 are complete.
 
 - `backend/`: FastAPI and SQLite, initialized only from the approved business seed files. APIs cover the 25-claim queue, full claim bundles, section-level policy/manual search and reads, handlers, split agent instructions, decisions, activity, sign-off and payment. The backend blocks payments over $1,000 until an eligible handler signs off. Agent runs that finish without a decision are marked failed and returned to Waiting.
 - `agent/`: LangChain `create_agent` with `run(claim_id, thread_id)` and API-only tools for claim data, policy wording, decisions and payment. The default model is `deepseek/deepseek-v4.1-flash` with low reasoning effort; `MODEL_NAME` overrides it. Each run records the selected model in the dashboard's Agent activity feed.
@@ -42,4 +42,4 @@ This runs Ruff, Pyright, pytest with at least 80% coverage, Prettier, ESLint, ts
 
 The real-model smoke run approved `CLM-1001` for $420.00, cited policy sections 3 and 10, recorded a three-sentence reason and ended Decided. The over-limit flow remained blocked before sign-off and recorded $3,750.00 after Dana signed off. Final browser checks had no console errors.
 
-Harness Phase 3: `npm run check:python` passed 59 tests with 96.25% coverage. Each selected claim uses a fresh subagent and attempt thread. First failures return to Waiting, second failures become Left for handler, completed work is idempotent, and interrupted small approvals recover payment without duplication.
+Harness Phase 4: `npm run check:python` passed 63 tests with 95.72% coverage. Queue and named runs now use a LangChain queue agent with list, plan, work, to-do check and finish tools. Completion is blocked for missed claims, failures release in-progress claims, and run responses expose models and summaries.
