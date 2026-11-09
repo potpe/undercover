@@ -122,6 +122,10 @@ function makeBundle(
       : null,
     paid_amount: null,
     signed_off_by: null,
+    signed_off_by_name: null,
+    signed_off_at: null,
+    paid_at: null,
+    agent_thread_id: null,
     activity,
     documents_read: [
       {
@@ -275,20 +279,32 @@ it.each(["decline", "refer"] as const)(
   },
 );
 
-it("signs off and then records an over-limit payment", async () => {
+it("signs off and polls until the agent records an over-limit payment", async () => {
   const waiting = makeBundle("waiting_for_sign_off", "approve", 3750);
-  const signed = { ...waiting, signed_off_by: "HND-01" };
+  const signed = {
+    ...waiting,
+    claim: { ...waiting.claim, status: "in_progress" as const },
+    signed_off_by: "HND-01",
+    signed_off_by_name: "Dana Whitfield",
+    signed_off_at: "2026-11-09T12:00:00Z",
+  };
   const paid = {
     ...signed,
     claim: { ...signed.claim, status: "decided" as const },
     paid_amount: 3750,
+    paid_at: "2026-11-09T12:00:02Z",
   };
+  let reads = 0;
   const fetchMock = mockDetail(waiting);
   fetchMock.mockImplementation(
     (input: RequestInfo | URL, init?: RequestInit) => {
       const url = requestUrl(input);
-      if (url === "/api/claims/CLM-1001" && !init)
-        return Promise.resolve(response(waiting));
+      if (url === "/api/claims/CLM-1001" && !init) {
+        reads += 1;
+        let current: ClaimBundle = paid;
+        if (reads === 1) current = waiting;
+        return Promise.resolve(response(current));
+      }
       if (url === "/api/handlers") {
         return Promise.resolve(
           response([
@@ -318,30 +334,30 @@ it("signs off and then records an over-limit payment", async () => {
   });
   expect(selector).toHaveProperty("value", "HND-01");
   const signOffButton = screen.getByRole("button", {
-    name: "Sign off and record payment",
+    name: "Sign off payout",
   });
   expect(signOffButton).toHaveProperty("disabled", false);
   fireEvent.click(signOffButton);
 
   expect(await screen.findByText("Payment recorded: $3,750.00")).toBeDefined();
+  expect(screen.getByText(/Signed off by Dana Whitfield at/)).toBeDefined();
+  expect(screen.getByText(/Paid at/)).toBeDefined();
   const urls = fetchMock.mock.calls.map(([input]) => requestUrl(input));
-  expect(urls.indexOf("/api/claims/CLM-1001/sign-off")).toBeLessThan(
-    urls.indexOf("/api/claims/CLM-1001/payment"),
-  );
   expect(
-    screen.queryByRole("button", { name: "Sign off and record payment" }),
-  ).toBeNull();
+    urls.filter((url) => url === "/api/claims/CLM-1001/sign-off"),
+  ).toHaveLength(1);
+  expect(urls).not.toContain("/api/claims/CLM-1001/payment");
+  expect(screen.queryByRole("button", { name: "Sign off payout" })).toBeNull();
 });
 
-it("shows a rejected payment and keeps the decision visible", async () => {
+it("shows a rejected sign-off and keeps the decision visible", async () => {
   const waiting = makeBundle("waiting_for_sign_off", "approve", 3750);
-  const signed = { ...waiting, signed_off_by: "HND-01" };
   const fetchMock = mockDetail(waiting);
   fetchMock.mockImplementation(
     (input: RequestInfo | URL, init?: RequestInit) => {
       const url = requestUrl(input);
       if (url === "/api/claims/CLM-1001" && !init)
-        return Promise.resolve(response(signed));
+        return Promise.resolve(response(waiting));
       if (url === "/api/handlers")
         return Promise.resolve(
           response([
@@ -355,8 +371,6 @@ it("shows a rejected payment and keeps the decision visible", async () => {
           ]),
         );
       if (url === "/api/claims/CLM-1001/sign-off")
-        return Promise.resolve(response(signed));
-      if (url === "/api/claims/CLM-1001/payment")
         return Promise.resolve(
           response(
             { detail: "Payout over $1,000.00 requires handler sign-off" },
@@ -368,8 +382,12 @@ it("shows a rejected payment and keeps the decision visible", async () => {
   );
   render(<ClaimWorkspace claimId="CLM-1001" onBack={vi.fn()} />);
 
-  await screen.findByLabelText("Signing handler");
-  fireEvent.click(screen.getByRole("button", { name: "Record payment" }));
+  const selector = await screen.findByLabelText("Signing handler");
+  await screen.findByRole("option", { name: "Dana Whitfield" });
+  act(() => {
+    fireEvent.change(selector, { target: { value: "HND-01" } });
+  });
+  fireEvent.click(screen.getByRole("button", { name: "Sign off payout" }));
 
   expect(await screen.findByRole("alert")).toHaveProperty(
     "textContent",

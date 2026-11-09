@@ -1,11 +1,12 @@
 # Status
 
-The durable-state build is in progress. Phases 1 through 3 are complete.
+The durable-state build is in progress. Phase 4 is implemented; automatic recovery is next.
 
 - `backend/`: FastAPI and SQLAlchemy Core, using SQLite by default or Supabase Postgres when `DATABASE_URL` is set. Postgres uses the `undercover` schema and at most four pooled connections per process. APIs cover claims, section-level policy/manual reads, deterministic rule-based payouts, capped runs, durable to-dos, attempts, decisions, activity, sign-off, payment and summaries. Payments over $1,000 stay blocked until sign-off. First failures return claims to Waiting; second failures leave them for a handler; completed work cannot be repeated.
 - `agent/`: a hand-written synchronous LangGraph claim graph with API-only claim, document and payout tools, structured decisions, interrupt/resume and graph-owned payment. The queue agent remains LangChain `create_agent`. Checkpoints use Supabase `PostgresSaver` or local SQLite, with sync durability and stable claim/thread Langfuse sessions. The default is `deepseek/deepseek-v4.1-flash` with low reasoning; `MODEL_NAME` overrides it.
-- `dashboard/`: branded, responsive claims queue with capped Run queue controls and a live current-run/to-do panel; full claim workspace with activity and sections read; separate read-only queue/claim instructions; handler sign-off/payment controls and Left for handler states.
-- `e2e/`: seven Playwright tests covering the queue, both instruction sets, claim details, decisions, sign-off, run to-dos, document reads and cap validation. They use an isolated SQLite database, a dedicated dashboard port and never call a model.
+- `dashboard/`: branded, responsive claims queue with capped Run queue controls and a live current-run/to-do panel; full claim workspace with activity and sections read; separate read-only queue/claim instructions; sign-off-only handler controls with automatic agent payment, and Left for handler states.
+- `agent/service.py`: a separate FastAPI service on port 8002 for claim work, queue runs and sign-off resume. The backend delegates through `UNDERCOVER_AGENT`; sign-off is saved before notification and stands if the agent is unavailable.
+- `e2e/`: seven Playwright tests covering the queue, both instruction sets, claim details, decisions, sign-off notification, run to-dos, document reads and cap validation. They use isolated SQLite and a stand-in agent on port 8003, never a model.
 
 ## Set up
 
@@ -44,4 +45,4 @@ This runs Ruff, Pyright, pytest with at least 80% coverage, Prettier, ESLint, ts
 
 After reseeding, the real DeepSeek V4.1 Flash run with cap five completed `CLM-1001` through `CLM-1005` on the first attempt and left the other 20 claims waiting. `CLM-1001` used the calculator tool to record and pay exactly $420.00; `CLM-1003` approved $3,750.00 and remained unpaid pending sign-off. Each claim recorded its activity and sections read, and the final browser check had no console errors. The student's original `MODEL_NAME` override was restored after the live check.
 
-Durable Phase 3: `npm run check:python` passed 82 tests with 94.96% coverage. Stub-driven graph tests cover under-limit payment, over-limit interrupt/resume, same-thread completion, tool refusal, the 30-call cap and idempotent checkpoint replay. The previous full gate remains the baseline for later phases.
+Durable Phase 4: 85 Python tests passed with 94.38% coverage; 17 Vitest tests passed with 91.93% statement coverage; seven Playwright tests passed using the agent stand-in. A local smoke test started backend 8000, agent 8002 and dashboard 5173 without hosted services. Automatic recovery is implemented in Phase 5.

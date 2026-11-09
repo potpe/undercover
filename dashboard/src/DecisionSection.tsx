@@ -1,5 +1,5 @@
 import type { ClaimBundle, Handler } from "./api";
-import { formatMoney } from "./format";
+import { formatDateTime, formatMoney } from "./format";
 
 export function DecisionSection({
   bundle,
@@ -19,9 +19,7 @@ export function DecisionSection({
   const decision = bundle.decision;
   if (!decision) return null;
 
-  let signOffLabel = "Sign off and record payment";
-  if (bundle.signed_off_by) signOffLabel = "Record payment";
-  if (busy) signOffLabel = "Recording…";
+  const signOffLabel = busy ? "Signing off…" : "Sign off payout";
 
   return (
     <section className="panel decision-panel" aria-labelledby="decision-title">
@@ -47,6 +45,17 @@ export function DecisionSection({
           </div>
         ) : null}
       </div>
+      {bundle.signed_off_by_name && bundle.signed_off_at ? (
+        <p className="sign-off-details">
+          Signed off by {bundle.signed_off_by_name} at{" "}
+          {formatDateTime(bundle.signed_off_at)}
+        </p>
+      ) : null}
+      {bundle.paid_at ? (
+        <p className="payment-details">
+          Paid at {formatDateTime(bundle.paid_at)}
+        </p>
+      ) : null}
       <p className="decision-reason">{decision.reason}</p>
       <p className="policy-citation">
         <strong>Policy section</strong>
@@ -81,7 +90,7 @@ export function DecisionSection({
           <button
             type="button"
             className="primary-action"
-            disabled={busy || (!bundle.signed_off_by && !handlerId)}
+            disabled={busy || !handlerId}
             onClick={() => {
               void onSignOff();
             }}

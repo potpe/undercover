@@ -9,6 +9,13 @@ export function formatMoney(amount: number): string {
   return moneyFormatter.format(amount);
 }
 
+export function formatDateTime(value: string): string {
+  return new Intl.DateTimeFormat("en-US", {
+    dateStyle: "medium",
+    timeStyle: "short",
+  }).format(new Date(value));
+}
+
 export function formatClaimType(claimType: string): string {
   const label = claimType.replaceAll("_", " ");
   return label.charAt(0).toUpperCase() + label.slice(1);

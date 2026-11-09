@@ -1,13 +1,7 @@
-import pytest
 from sqlalchemy import update
 
 from backend import main
 from backend.database import claims_table, connect, run_todos_table
-
-
-@pytest.fixture(autouse=True)
-def defer_queue_agent(monkeypatch):
-    monkeypatch.setattr(main, "execute_queue_run", lambda run_id, thread_id: None)
 
 
 def create_run(client, cap=5, thread_id="thread-queue"):
@@ -124,7 +118,9 @@ def test_plan_uses_only_available_waiting_claims(client):
 
 
 def test_named_claim_run_has_a_fixed_cap_one_target(client, monkeypatch):
-    monkeypatch.setattr(main, "agent_run", lambda claim_id, thread_id: "No decision")
+    monkeypatch.setattr(
+        main, "run_claim_via_service", lambda claim_id, thread_id: "No decision"
+    )
 
     response = client.post("/api/claims/CLM-1001/run", json={"thread_id": "single"})
     assert response.status_code == 202

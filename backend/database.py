@@ -374,6 +374,13 @@ def get_claim_bundle(claim_id: str) -> dict[str, Any] | None:
         add_on_data = connection.execute(
             select(settings_table.c.data).where(settings_table.c.key == "add_ons")
         ).scalar_one()
+        signing_handler = None
+        if row["signed_off_by"]:
+            signing_handler = connection.execute(
+                select(handlers_table.c.data).where(
+                    handlers_table.c.handler_id == row["signed_off_by"]
+                )
+            ).scalar_one()
 
     claim = {**row["data"], "status": row["status"]}
     add_ons = [item for item in add_on_data if item["add_on"] in policy["add_ons"]]
@@ -396,6 +403,7 @@ def get_claim_bundle(claim_id: str) -> dict[str, Any] | None:
             float(row["paid_amount"]) if row["paid_amount"] is not None else None
         ),
         "signed_off_by": row["signed_off_by"],
+        "signed_off_by_name": signing_handler["name"] if signing_handler else None,
         "signed_off_at": iso(row["signed_off_at"]),
         "paid_at": iso(row["paid_at"]),
         "agent_thread_id": row["agent_thread_id"],

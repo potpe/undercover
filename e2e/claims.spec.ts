@@ -114,7 +114,7 @@ test("a decided claim shows its payout, reason, policy and activity", async ({
   await expect(page.getByRole("button", { name: "Run agent" })).toHaveCount(0);
 });
 
-test("an over-limit payout is paid only after handler sign-off", async ({
+test("handler sign-off reaches the agent service without direct payment", async ({
   page,
   request,
 }) => {
@@ -147,22 +147,29 @@ test("an over-limit payout is paid only after handler sign-off", async ({
     page.getByText("Payment recorded: $3,750.00", { exact: true }),
   ).toHaveCount(0);
   await page.getByLabel("Signing handler").selectOption("HND-01");
-  await page
-    .getByRole("button", { name: "Sign off and record payment" })
-    .click();
+  await page.getByRole("button", { name: "Sign off payout" }).click();
 
+  await expect(page.locator(".status-in_progress")).toHaveText("In progress");
+  await expect(page.getByText(/Signed off by Dana Whitfield at/)).toBeVisible();
   await expect(
     page.locator(".decision-summary").getByText("Payment recorded: $3,750.00", {
       exact: true,
     }),
-  ).toBeVisible();
-  await expect(page.locator(".status-decided")).toHaveText("Decided");
-  await expect(
-    page.getByText("Payment signed off by Dana Whitfield", { exact: true }),
-  ).toBeVisible();
+  ).toHaveCount(0);
   const result = await request.get("http://127.0.0.1:8000/api/claims/CLM-1003");
-  const body = (await result.json()) as { paid_amount: number | null };
-  expect(body.paid_amount).toBe(3750);
+  const body = (await result.json()) as {
+    paid_amount: number | null;
+    signed_off_by: string | null;
+    signed_off_at: string | null;
+  };
+  expect(body.paid_amount).toBeNull();
+  expect(body.signed_off_by).toBe("HND-01");
+  expect(body.signed_off_at).not.toBeNull();
+  const calls = await request.get("http://127.0.0.1:8003/requests");
+  const requests = (await calls.json()) as { method: string; url: string }[];
+  expect(
+    requests.filter((entry) => entry.url === "/claims/CLM-1003/resume"),
+  ).toHaveLength(1);
 });
 
 test("the dashboard shows run to-dos and the sections read", async ({

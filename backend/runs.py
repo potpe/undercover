@@ -321,10 +321,11 @@ def work_claim(
         if todo["status"] == "in_progress" or claim["status"] != "waiting":
             raise HTTPException(status_code=409, detail="Claim is already being worked")
         attempt = todo["attempts"] + 1
+        thread_id = f"{run_id}:{claim_id}:attempt-{attempt}"
         connection.execute(
             update(claims_table)
             .where(claims_table.c.claim_id == claim_id)
-            .values(status="in_progress")
+            .values(status="in_progress", agent_thread_id=thread_id)
         )
         connection.execute(
             update(run_todos_table)
@@ -338,7 +339,7 @@ def work_claim(
     reply = None
     error = None
     try:
-        reply = runner(claim_id, f"{run_id}:{claim_id}:attempt-{attempt}")
+        reply = runner(claim_id, thread_id)
     except Exception as caught:
         error = str(caught)
 

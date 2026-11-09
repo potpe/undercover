@@ -42,6 +42,7 @@ def test_claim_details_include_the_complete_claim_bundle(client):
     assert bundle["decision"] is None
     assert bundle["paid_amount"] is None
     assert bundle["signed_off_by"] is None
+    assert bundle["signed_off_by_name"] is None
     assert bundle["signed_off_at"] is None
     assert bundle["paid_at"] is None
     assert bundle["agent_thread_id"] is None

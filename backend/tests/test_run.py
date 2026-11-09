@@ -19,17 +19,17 @@ def test_agent_instructions_are_served_read_only(client):
 def test_named_run_schedules_the_queue_agent(client, monkeypatch):
     calls = []
 
-    def schedule_spy(run_id, thread_id):
-        calls.append((run_id, thread_id))
+    def schedule_spy(run_id):
+        calls.append(run_id)
 
-    monkeypatch.setattr(main, "execute_queue_run", schedule_spy)
+    monkeypatch.setattr(main, "notify_agent_run", schedule_spy)
 
     response = client.post("/api/claims/CLM-1001/run", json={"thread_id": "thread-api"})
 
     assert response.status_code == 202
     assert response.json()["claim_id"] == "CLM-1001"
     assert response.json()["status"] == "in_progress"
-    assert calls == [(response.json()["run_id"], "thread-api")]
+    assert calls == [response.json()["run_id"]]
 
 
 def test_duplicate_run_is_rejected_while_in_progress(client):

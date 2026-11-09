@@ -191,6 +191,7 @@ class ClaimBundle(BaseModel):
     decision: Decision | None
     paid_amount: float | None
     signed_off_by: str | None
+    signed_off_by_name: str | None
     signed_off_at: str | None
     paid_at: str | None
     agent_thread_id: str | None

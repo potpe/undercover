@@ -1,13 +1,6 @@
-import pytest
-
 from backend import main
 from backend.models import DecisionRequest, PaymentRequest
 from backend.workflow import record_decision, record_payment
-
-
-@pytest.fixture(autouse=True)
-def defer_queue_agent(monkeypatch):
-    monkeypatch.setattr(main, "execute_queue_run", lambda run_id, thread_id: None)
 
 
 def planned_run(client, claim_id="CLM-1001"):
@@ -47,7 +40,7 @@ def test_work_completes_one_claim_and_repeats_without_another_agent(
         record_payment(claim_id, PaymentRequest(amount=420.0))
         return "CLM-1001: approve $420.00"
 
-    monkeypatch.setattr(main, "agent_run", runner)
+    monkeypatch.setattr(main, "run_claim_via_service", runner)
     response = work(client, run_id)
 
     assert response.status_code == 200
@@ -68,7 +61,7 @@ def test_over_limit_approval_is_done_but_unpaid(client, monkeypatch):
         approve(claim_id, 3750.0)
         return "CLM-1003: approve $3,750.00; sign-off required"
 
-    monkeypatch.setattr(main, "agent_run", runner)
+    monkeypatch.setattr(main, "run_claim_via_service", runner)
 
     response = work(client, run_id, "CLM-1003")
     assert response.json()["status"] == "done"
@@ -100,7 +93,7 @@ def test_first_failure_returns_to_queue_and_fresh_retry_succeeds(client, monkeyp
         )
         return "CLM-1001: decline $0.00"
 
-    monkeypatch.setattr(main, "agent_run", runner)
+    monkeypatch.setattr(main, "run_claim_via_service", runner)
 
     first = work(client, run_id)
     assert first.status_code == 200
@@ -128,7 +121,7 @@ def test_two_failures_leave_claim_for_handler_without_third_attempt(
         calls.append(thread_id)
         raise RuntimeError(f"Provider failure {len(calls)}")
 
-    monkeypatch.setattr(main, "agent_run", runner)
+    monkeypatch.setattr(main, "run_claim_via_service", runner)
 
     assert work(client, run_id).json()["status"] == "retry"
     second = work(client, run_id)
@@ -164,7 +157,7 @@ def test_failure_does_not_change_another_claim(client, monkeypatch):
     )
     monkeypatch.setattr(
         main,
-        "agent_run",
+        "run_claim_via_service",
         lambda claim_id, thread_id: (_ for _ in ()).throw(RuntimeError("Offline")),
     )
 
@@ -189,7 +182,7 @@ def test_interruption_after_decision_recovers_payment_without_duplicate(
         approve(claim_id)
         raise RuntimeError("Connection lost after decision")
 
-    monkeypatch.setattr(main, "agent_run", runner)
+    monkeypatch.setattr(main, "run_claim_via_service", runner)
 
     response = work(client, run_id)
     assert response.json()["status"] == "done"
@@ -213,7 +206,9 @@ def test_interruption_after_decision_recovers_payment_without_duplicate(
 
 def test_normal_return_without_decision_is_a_retryable_failure(client, monkeypatch):
     run_id = planned_run(client)
-    monkeypatch.setattr(main, "agent_run", lambda claim_id, thread_id: "No decision")
+    monkeypatch.setattr(
+        main, "run_claim_via_service", lambda claim_id, thread_id: "No decision"
+    )
 
     response = work(client, run_id)
 

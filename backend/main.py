@@ -1,14 +1,14 @@
 """The UnderCover backend."""
 
+import os
 from collections.abc import AsyncIterator
-from contextlib import asynccontextmanager
+from contextlib import asynccontextmanager, suppress
 from pathlib import Path
 from typing import Any
 
+import httpx
 from fastapi import BackgroundTasks, FastAPI, HTTPException
 
-from agent.main import run as agent_run
-from agent.queue import run as queue_agent_run
 from backend.database import (
     add_activity,
     get_claim_bundle,
@@ -45,14 +45,7 @@ from backend.payout import calculate_claim_payout
 from backend.runs import (
     create_run as create_agent_run,
 )
-from backend.runs import (
-    current_run,
-    fail_queue_run,
-    finish_run,
-    get_run,
-    save_plan,
-    work_claim,
-)
+from backend.runs import current_run, finish_run, get_run, save_plan, work_claim
 from backend.workflow import record_decision, record_payment, sign_off
 
 
@@ -65,14 +58,28 @@ async def lifespan(_: FastAPI) -> AsyncIterator[None]:
 app = FastAPI(title="UnderCover", lifespan=lifespan)
 
 
-def execute_queue_run(run_id: int, thread_id: str) -> None:
-    try:
-        queue_agent_run(run_id, thread_id)
-        run = get_run(run_id)
-        if run and run["status"] == "in_progress":
-            raise RuntimeError("Queue agent finished without completing the run")
-    except Exception as error:
-        fail_queue_run(run_id, str(error))
+def agent_post(
+    path: str, timeout: float, body: dict[str, Any] | None = None
+) -> httpx.Response:
+    base_url = os.getenv("UNDERCOVER_AGENT", "http://127.0.0.1:8002")
+    with httpx.Client(base_url=base_url, timeout=timeout) as client:
+        return client.post(path, json=body)
+
+
+def notify_agent_run(run_id: int) -> None:
+    with suppress(httpx.HTTPError):
+        agent_post(f"/runs/{run_id}", 5).raise_for_status()
+
+
+def notify_agent_resume(claim_id: str) -> None:
+    with suppress(httpx.HTTPError):
+        agent_post(f"/claims/{claim_id}/resume", 5).raise_for_status()
+
+
+def run_claim_via_service(claim_id: str, thread_id: str) -> str:
+    response = agent_post(f"/claims/{claim_id}/work", 120, {"thread_id": thread_id})
+    response.raise_for_status()
+    return response.json()["result"]
 
 
 @app.get("/api/health", operation_id="health")
@@ -110,9 +117,12 @@ def decision(claim_id: str, request: DecisionRequest) -> ClaimBundle:
 
 
 @app.post("/api/claims/{claim_id}/sign-off", operation_id="sign_off_claim")
-def sign_off_claim(claim_id: str, request: SignOffRequest) -> ClaimBundle:
-    """Record a handler's sign-off for an over-limit payout."""
+def sign_off_claim(
+    claim_id: str, request: SignOffRequest, background_tasks: BackgroundTasks
+) -> ClaimBundle:
+    """Save handler sign-off and ask the agent to resume payment."""
     sign_off(claim_id, request)
+    background_tasks.add_task(notify_agent_resume, claim_id)
     return claim(claim_id)
 
 
@@ -129,7 +139,7 @@ def run_claim(
 ) -> RunResponse:
     """Start the UnderCover Agent on a waiting claim."""
     run = create_agent_run(request.thread_id, 1, claim_id)
-    background_tasks.add_task(execute_queue_run, run["run_id"], request.thread_id)
+    background_tasks.add_task(notify_agent_run, run["run_id"])
     return RunResponse(run_id=run["run_id"], claim_id=claim_id, status="in_progress")
 
 
@@ -137,7 +147,7 @@ def run_claim(
 def queue_run(request: QueueRunRequest, background_tasks: BackgroundTasks) -> AgentRun:
     """Start a capped queue run for the UnderCover Agent."""
     run = create_agent_run(request.thread_id, request.claim_cap)
-    background_tasks.add_task(execute_queue_run, run["run_id"], request.thread_id)
+    background_tasks.add_task(notify_agent_run, run["run_id"])
     return AgentRun(**run)
 
 
@@ -165,8 +175,8 @@ def plan_agent_run(run_id: int, request: RunPlanRequest) -> AgentRun:
 
 @app.post("/api/runs/{run_id}/work", operation_id="work_run_claim")
 def work_run_claim(run_id: int, request: WorkRequest) -> WorkOutcome:
-    """Work one selected claim with a fresh claim subagent."""
-    return WorkOutcome(**work_claim(run_id, request.claim_id, agent_run))
+    """Work one selected claim through the agent service."""
+    return WorkOutcome(**work_claim(run_id, request.claim_id, run_claim_via_service))
 
 
 @app.post("/api/runs/{run_id}/finish", operation_id="finish_agent_run")

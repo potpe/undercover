@@ -121,7 +121,11 @@ def sign_off(claim_id: str, request: SignOffRequest) -> None:
         connection.execute(
             update(claims_table)
             .where(claims_table.c.claim_id == claim_id)
-            .values(signed_off_by=request.handler_id, signed_off_at=timestamp())
+            .values(
+                signed_off_by=request.handler_id,
+                signed_off_at=timestamp(),
+                status="in_progress",
+            )
         )
         insert_activity(
             connection,

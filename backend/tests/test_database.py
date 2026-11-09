@@ -8,7 +8,7 @@ from backend.database import (
 
 
 def test_reseed_restores_the_queue_and_clears_all_work(client, monkeypatch):
-    monkeypatch.setattr(main, "execute_queue_run", lambda run_id, thread_id: None)
+    monkeypatch.setattr(main, "notify_agent_run", lambda run_id: None)
     client.post(
         "/api/claims/CLM-1001/decision",
         json={

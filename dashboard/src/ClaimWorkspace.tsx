@@ -2,7 +2,6 @@ import { useEffect, useState } from "react";
 import {
   getClaim,
   listHandlers,
-  payClaim,
   runClaim,
   signOffClaim,
   type ClaimBundle,
@@ -95,8 +94,7 @@ export function ClaimWorkspace({
     setBusy(true);
     setActionError("");
     try {
-      if (!bundle.signed_off_by) await signOffClaim(claimId, handlerId);
-      setBundle(await payClaim(claimId, bundle.decision.payout));
+      setBundle(await signOffClaim(claimId, handlerId));
     } catch (error) {
       setActionError(errorMessage(error));
       setBundle(await getClaim(claimId));

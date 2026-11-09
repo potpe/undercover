@@ -5,6 +5,7 @@ from langchain_core.messages import AIMessage
 from sqlalchemy import update
 
 from agent import queue as queue_agent
+from agent import service
 from backend import main
 from backend.database import claims_table, connect, run_todos_table
 from backend.main import app
@@ -70,11 +71,16 @@ def use_queue_stub(client, monkeypatch, plan_ids, work_ids, early_finish=False):
     monkeypatch.setattr(
         queue_agent, "model", lambda: StubModel(messages=iter(messages))
     )
-    monkeypatch.setattr(main, "agent_run", settle)
+    monkeypatch.setattr(main, "run_claim_via_service", settle)
+
+    def start_queue(run_id):
+        thread_id = client.get(f"/api/runs/{run_id}").json()["thread_id"]
+        queue_agent.run(run_id, thread_id)
+
+    monkeypatch.setattr(main, "notify_agent_run", start_queue)
 
 
 def test_list_claims_exposes_the_run_cap_and_target(client, monkeypatch):
-    monkeypatch.setattr(main, "execute_queue_run", lambda run_id, thread_id: None)
     created = client.post("/api/runs", json={"thread_id": "cap", "claim_cap": 5})
     run_id = created.json()["run_id"]
     monkeypatch.setattr(queue_agent, "backend", lambda: TestClient(app))
@@ -152,7 +158,7 @@ def test_failed_claim_does_not_stop_the_remaining_claims(client, monkeypatch):
             raise RuntimeError("Provider unavailable")
         return settle(claim_id, thread_id)
 
-    monkeypatch.setattr(main, "agent_run", fail_first)
+    monkeypatch.setattr(main, "run_claim_via_service", fail_first)
 
     client.post("/api/runs", json={"thread_id": "mixed", "claim_cap": 2})
 
@@ -188,7 +194,9 @@ def test_failed_queue_run_releases_an_in_progress_claim(client, monkeypatch):
             )
         raise RuntimeError("Queue provider failed")
 
-    monkeypatch.setattr(main, "queue_agent_run", fail_queue)
+    monkeypatch.setattr(service, "backend", lambda: TestClient(app))
+    monkeypatch.setattr(service, "queue_run", fail_queue)
+    monkeypatch.setattr(main, "notify_agent_run", service.run_stored_run)
 
     client.post("/api/runs", json={"thread_id": "failed", "claim_cap": 1})
 
@@ -231,7 +239,13 @@ def test_queue_agent_can_correct_a_rejected_plan(client, monkeypatch):
     monkeypatch.setattr(
         queue_agent, "model", lambda: StubModel(messages=iter(messages))
     )
-    monkeypatch.setattr(main, "agent_run", settle)
+    monkeypatch.setattr(main, "run_claim_via_service", settle)
+
+    def start_queue(run_id):
+        thread_id = client.get(f"/api/runs/{run_id}").json()["thread_id"]
+        queue_agent.run(run_id, thread_id)
+
+    monkeypatch.setattr(main, "notify_agent_run", start_queue)
 
     client.post("/api/runs", json={"thread_id": "corrected", "claim_cap": 1})
 

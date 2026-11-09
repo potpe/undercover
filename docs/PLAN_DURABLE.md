@@ -130,14 +130,14 @@ Separate agent execution from the backend, make saved sign-off trigger a non-blo
 
 ### Success criteria
 
-- [ ] `npm run dev` starts backend, agent and dashboard with the documented ports and `.env`; process scripts work on Windows and stop all three together. The backend no longer imports or executes the claim/queue agent in process.
-- [ ] Agent service run/resume operations have unique operation ids, docstrings and typed responses. A run notification returns immediately, and service tests execute the stored run through stub models.
-- [ ] A Python integration test drives an over-limit claim to its interrupt, signs off through the backend and calls the real agent service with a stub model/checkpointer. The claim becomes `in_progress` after sign-off, then decided and paid once with the same thread and attempt count.
-- [ ] Sign-off saves handler id/name resolution and `signed_off_at` before notification; payment adds `paid_at`. Backend responses and activity show who signed off and when, and the signing handler cannot be changed by the resume request.
+- [x] `npm run dev` starts backend, agent and dashboard with the documented ports and `.env`; process scripts work on Windows and stop all three together. The backend no longer imports or executes the claim/queue agent in process.
+- [x] Agent service run/resume operations have unique operation ids, docstrings and typed responses. A run notification returns immediately, and service tests execute the stored run through stub models.
+- [x] A Python integration test drives an over-limit claim to its interrupt, signs off through the backend and calls the real agent service with a stub model/checkpointer. The claim becomes `in_progress` after sign-off, then decided and paid once with the same thread and attempt count.
+- [x] Sign-off saves handler id/name resolution and `signed_off_at` before notification; payment adds `paid_at`. Backend responses and activity show who signed off and when, and the signing handler cannot be changed by the resume request.
 - [ ] An unavailable agent service leaves the saved sign-off and `in_progress` claim intact, returns the sign-off without waiting for payment, and performs no direct backend/dashboard payment. A later service start recovers it.
-- [ ] The dashboard button changes to a sign-off-only action, never calls `payClaim`, polls the signed-off `in_progress` claim and displays signing handler/time plus paid amount/time when the agent finishes. Existing claim, queue and instruction views still work.
-- [ ] Playwright uses a stand-in agent server on port 8003 through `UNDERCOVER_AGENT`; signing off in the browser produces exactly one resume request at that stand-in and never reaches port 8002 or a model. Python tests, not this stand-in, prove actual resume/payment.
-- [ ] `npm run check:ts` and `npm run e2e` pass with strict TypeScript, no `any`, at least 80% Vitest coverage and no external service calls.
+- [x] The dashboard button changes to a sign-off-only action, never calls `payClaim`, polls the signed-off `in_progress` claim and displays signing handler/time plus paid amount/time when the agent finishes. Existing claim, queue and instruction views still work.
+- [x] Playwright uses a stand-in agent server on port 8003 through `UNDERCOVER_AGENT`; signing off in the browser produces exactly one resume request at that stand-in and never reaches port 8002 or a model. Python tests, not this stand-in, prove actual resume/payment.
+- [x] `npm run check:ts` and `npm run e2e` pass with strict TypeScript, no `any`, at least 80% Vitest coverage and no external service calls.
 
 ## Phase 5: Restart recovery and interrupted queue completion
 

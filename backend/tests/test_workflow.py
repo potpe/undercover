@@ -65,7 +65,7 @@ def test_over_limit_payment_waits_for_sign_off(client):
     assert sign_off.json()["signed_off_by"] == "HND-01"
     assert sign_off.json()["paid_amount"] is None
     assert sign_off.json()["signed_off_at"] is not None
-    assert sign_off.json()["claim"]["status"] == "waiting_for_sign_off"
+    assert sign_off.json()["claim"]["status"] == "in_progress"
 
     paid = pay(client, claim_id="CLM-1003", amount=3750.0)
     assert paid.status_code == 200

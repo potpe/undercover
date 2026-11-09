@@ -148,6 +148,10 @@ export interface ClaimBundle {
   decision: Decision | null;
   paid_amount: number | null;
   signed_off_by: string | null;
+  signed_off_by_name: string | null;
+  signed_off_at: string | null;
+  paid_at: string | null;
+  agent_thread_id: string | null;
   activity: Activity[];
   documents_read: DocumentRead[];
 }
@@ -219,11 +223,4 @@ export function signOffClaim(
   handlerId: string,
 ): Promise<ClaimBundle> {
   return postJson(`/api/claims/${claimId}/sign-off`, { handler_id: handlerId });
-}
-
-export function payClaim(
-  claimId: string,
-  amount: number,
-): Promise<ClaimBundle> {
-  return postJson(`/api/claims/${claimId}/payment`, { amount });
 }
