@@ -115,14 +115,14 @@ Replace only the claim agent's `create_agent` with the designed graph. Add porta
 
 ### Success criteria
 
-- [ ] Graph construction tests verify the state, nodes and conditional edges, synchronous checkpointer selection and `durability="sync"` on start, resume and payment paths. The queue agent still uses `create_agent`.
-- [ ] A stub-model under-limit claim reads its claim/documents, calls the backend payout tool, records one structured decision and pays in the graph's `pay` node. There is no model-facing payment tool, and the result/activity match the backend.
-- [ ] A stub-model over-limit approval records its decision, returns a LangGraph interrupt, remains `waiting_for_sign_off` and unpaid, and has a checkpoint whose next work is approval/payment rather than a fresh agent start.
-- [ ] Rebuilding the graph and invoking the held thread with a saved sign-off resumes the same state and pays once; no coverage analysis or attempt increment is repeated.
-- [ ] A refusal from a tool/backend operation becomes a tool message and is offered back to the stub model; every graph/tool step is visible in activity. A scripted loop stops at 30 model calls and enters the existing failure path.
-- [ ] Tests replay the record-decision and pay nodes at their checkpoint boundaries and prove one decision, one payment and unchanged sign-off/payment timestamps.
-- [ ] The test checkpointer survives graph object reconstruction using isolated SQLite, while production factory tests confirm `PostgresSaver`, its required psycopg options and the `undercover` schema without opening a connection.
-- [ ] `npm run check:python` passes all graph tests with a stub model and at least 80% coverage.
+- [x] Graph construction tests verify the state, nodes and conditional edges, synchronous checkpointer selection and `durability="sync"` on start, resume and payment paths. The queue agent still uses `create_agent`.
+- [x] A stub-model under-limit claim reads its claim/documents, calls the backend payout tool, records one structured decision and pays in the graph's `pay` node. There is no model-facing payment tool, and the result/activity match the backend.
+- [x] A stub-model over-limit approval records its decision, returns a LangGraph interrupt, remains `waiting_for_sign_off` and unpaid, and has a checkpoint whose next work is approval/payment rather than a fresh agent start.
+- [x] Rebuilding the graph and invoking the held thread with a saved sign-off resumes the same state and pays once; no coverage analysis or attempt increment is repeated.
+- [x] A refusal from a tool/backend operation becomes a tool message and is offered back to the stub model; every graph/tool step is visible in activity. A scripted loop stops at 30 model calls and enters the existing failure path.
+- [x] Tests replay the record-decision and pay nodes at their checkpoint boundaries and prove one decision, one payment and unchanged sign-off/payment timestamps.
+- [x] The test checkpointer survives graph object reconstruction using isolated SQLite, while production factory tests confirm `PostgresSaver`, its required psycopg options and the `undercover` schema without opening a connection.
+- [x] `npm run check:python` passes all graph tests with a stub model and at least 80% coverage.
 
 ## Phase 4: Agent service and sign-off resumption
 

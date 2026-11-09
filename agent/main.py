@@ -1,21 +1,43 @@
-"""The UnderCover Agent."""
+"""The durable UnderCover claim graph and its backend tools."""
 
 import os
-from typing import Any, Literal
+from typing import Annotated, Any, Literal, TypedDict, cast
 
 import httpx
-from langchain.agents import create_agent
+from langchain_core.messages import AnyMessage, HumanMessage, SystemMessage
 from langchain_core.runnables import RunnableConfig
 from langchain_core.tools import tool
 from langchain_openai import ChatOpenAI
+from langgraph.checkpoint.base import BaseCheckpointSaver
+from langgraph.graph import END, START, StateGraph
+from langgraph.graph.message import add_messages
+from langgraph.prebuilt import ToolNode
+from langgraph.types import Command, interrupt
 from pydantic import SecretStr
 
+from agent.checkpoints import claim_checkpointer
 from agent.tracing import trace_claim
-from backend.models import Benefit, PayoutLine
+from backend.models import Benefit, DecisionKind, DecisionRequest, PayoutLine
 
 BACKEND_URL = "http://localhost:8000"
 OPENROUTER_BASE_URL = "https://openrouter.ai/api/v1"
 DEFAULT_MODEL = "deepseek/deepseek-v4.1-flash"
+MAX_MODEL_CALLS = 30
+
+
+class ClaimState(TypedDict):
+    """The durable state of one claim graph."""
+
+    messages: Annotated[list[AnyMessage], add_messages]
+    claim_id: str
+    model_calls: int
+    decision: DecisionKind | None
+    payout: float
+    reason: str
+    policy_section: str
+    claim_status: str
+    approved_by: str | None
+    result: str
 
 
 def backend() -> httpx.Client:
@@ -101,38 +123,22 @@ def calculate_payout(
     return response.json()
 
 
-@tool
-def record_claim_decision(
-    claim_id: str,
-    decision: Literal["approve", "decline", "refer"],
-    payout: float,
-    reason: str,
-    policy_section: str,
-) -> str:
-    """Record one claim decision, its USD payout, reason and policy section."""
+def save_decision(claim_id: str, request: DecisionRequest) -> dict[str, Any]:
     with backend() as client:
         response = client.post(
-            f"/api/claims/{claim_id}/decision",
-            json={
-                "decision": decision,
-                "payout": payout,
-                "reason": reason,
-                "policy_section": policy_section,
-            },
+            f"/api/claims/{claim_id}/decision", json=request.model_dump()
         )
     response.raise_for_status()
-    return f"Decision recorded. Claim status: {response.json()['claim']['status']}."
+    return response.json()
 
 
-@tool
-def pay_claim(claim_id: str, amount: float) -> str:
-    """Record an approved claim's exact USD payment after backend rule checks."""
+def save_payment(claim_id: str, amount: float) -> dict[str, Any]:
     with backend() as client:
         response = client.post(
             f"/api/claims/{claim_id}/payment", json={"amount": amount}
         )
     response.raise_for_status()
-    return f"Payment recorded for ${amount:,.2f}."
+    return response.json()
 
 
 def model() -> ChatOpenAI:
@@ -147,32 +153,163 @@ def model() -> ChatOpenAI:
     )
 
 
+def route_after_agent(state: ClaimState) -> str:
+    if getattr(state["messages"][-1], "tool_calls", []):
+        return "tools"
+    if state.get("model_calls", 0) >= MAX_MODEL_CALLS:
+        return END
+    return "decide"
+
+
+def route_after_tools(state: ClaimState) -> str:
+    return END if state.get("model_calls", 0) >= MAX_MODEL_CALLS else "agent"
+
+
+def route_after_decision(state: ClaimState) -> str:
+    if state["decision"] != "approve":
+        return END
+    if state["claim_status"] == "waiting_for_sign_off":
+        return "approval"
+    if state["claim_status"] == "in_progress":
+        return "pay"
+    return END
+
+
+def build_claim_graph(
+    selected_model: Any, instructions: str, checkpointer: BaseCheckpointSaver
+):
+    system_message = SystemMessage(instructions)
+    model_with_tools = selected_model.bind_tools(
+        [read_claim, search_documents, read_document_section, calculate_payout]
+    )
+    decider = selected_model.with_structured_output(DecisionRequest)
+    tools = ToolNode(
+        [read_claim, search_documents, read_document_section, calculate_payout]
+    )
+
+    def agent(state: ClaimState) -> dict[str, Any]:
+        response = model_with_tools.invoke([system_message, *state["messages"]])
+        return {
+            "messages": [response],
+            "model_calls": state.get("model_calls", 0) + 1,
+        }
+
+    def decide(state: ClaimState) -> dict[str, Any]:
+        result = decider.invoke(
+            [
+                system_message,
+                *state["messages"],
+                HumanMessage("Record your decision on this claim."),
+            ]
+        )
+        log_activity(
+            state["claim_id"],
+            f"Decision prepared: {result.decision} for ${result.payout:,.2f}",
+        )
+        return {
+            "decision": result.decision,
+            "payout": result.payout,
+            "reason": result.reason,
+            "policy_section": result.policy_section,
+            "model_calls": state.get("model_calls", 0) + 1,
+        }
+
+    def record_decision(state: ClaimState) -> dict[str, Any]:
+        bundle = save_decision(
+            state["claim_id"],
+            DecisionRequest(
+                decision=cast(DecisionKind, state["decision"]),
+                payout=state["payout"],
+                reason=state["reason"],
+                policy_section=state["policy_section"],
+            ),
+        )
+        status = bundle["claim"]["status"]
+        result = f"{state['claim_id']}: {state['decision']} ${state['payout']:,.2f}"
+        if status == "waiting_for_sign_off":
+            result += "; waiting for sign-off"
+        return {"claim_status": status, "result": result}
+
+    def approval(state: ClaimState) -> dict[str, Any]:
+        answer = interrupt({"claim_id": state["claim_id"], "payout": state["payout"]})
+        return {"approved_by": answer["handler_id"], "claim_status": "in_progress"}
+
+    def pay(state: ClaimState) -> dict[str, Any]:
+        save_payment(state["claim_id"], state["payout"])
+        return {
+            "claim_status": "decided",
+            "result": (
+                f"{state['claim_id']}: approve ${state['payout']:,.2f}; "
+                "payment recorded"
+            ),
+        }
+
+    builder = StateGraph(ClaimState)
+    builder.add_node("agent", agent)
+    builder.add_node("tools", tools)
+    builder.add_node("decide", decide)
+    builder.add_node("record_decision", record_decision)
+    builder.add_node("approval", approval)
+    builder.add_node("pay", pay)
+    builder.add_edge(START, "agent")
+    builder.add_conditional_edges("agent", route_after_agent, ["tools", "decide", END])
+    builder.add_conditional_edges("tools", route_after_tools, ["agent", END])
+    builder.add_edge("decide", "record_decision")
+    builder.add_conditional_edges(
+        "record_decision", route_after_decision, ["approval", "pay", END]
+    )
+    builder.add_edge("approval", "pay")
+    builder.add_edge("pay", END)
+    return builder.compile(checkpointer=checkpointer)
+
+
+def current_bundle(claim_id: str) -> dict[str, Any]:
+    with backend() as client:
+        response = client.get(f"/api/claims/{claim_id}")
+    response.raise_for_status()
+    return response.json()
+
+
 def run(claim_id: str, thread_id: str) -> str:
-    """Run the agent on one claim and return its final reply."""
+    """Start or continue one claim on its durable thread."""
     with backend() as client:
         response = client.get("/api/agent/instructions")
     response.raise_for_status()
     selected_model = model()
-    log_activity(claim_id, f"Using model {selected_model.model_name}")
-    agent = create_agent(
-        selected_model,
-        tools=[
-            read_claim,
-            search_documents,
-            read_document_section,
-            calculate_payout,
-            record_claim_decision,
-            pay_claim,
-        ],
-        system_prompt=response.json()["claim"],
-    )
-    with trace_claim(claim_id, thread_id) as callbacks:
-        config: RunnableConfig = {
-            "configurable": {"thread_id": thread_id},
-            "callbacks": callbacks,
-        }
-        result = agent.invoke(
-            {"messages": [{"role": "user", "content": f"Work claim {claim_id}"}]},
-            config=config,
+    with claim_checkpointer() as checkpointer:
+        graph = build_claim_graph(
+            selected_model, response.json()["claim"], checkpointer
         )
-    return result["messages"][-1].text
+        config: RunnableConfig = {"configurable": {"thread_id": thread_id}}
+        saved = graph.get_state(config)
+        if saved.created_at is not None and not saved.next:
+            return saved.values["result"]
+
+        graph_input: ClaimState | Command[Any] | None
+        if saved.interrupts:
+            bundle = current_bundle(claim_id)
+            if not bundle["signed_off_by"]:
+                return saved.values["result"]
+            graph_input = Command(resume={"handler_id": bundle["signed_off_by"]})
+        elif saved.next:
+            graph_input = None
+        else:
+            graph_input = {
+                "messages": [HumanMessage(f"Work claim {claim_id}")],
+                "claim_id": claim_id,
+                "model_calls": 0,
+                "decision": None,
+                "payout": 0.0,
+                "reason": "",
+                "policy_section": "",
+                "claim_status": "in_progress",
+                "approved_by": None,
+                "result": "",
+            }
+        log_activity(claim_id, f"Using model {selected_model.model_name}")
+        with trace_claim(claim_id, thread_id) as callbacks:
+            config["callbacks"] = callbacks
+            result = graph.invoke(graph_input, config, durability="sync")
+        if "result" in result:
+            return result["result"]
+        return result["messages"][-1].text
