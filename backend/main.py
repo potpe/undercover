@@ -31,6 +31,8 @@ from backend.models import (
     FinishRunRequest,
     Instructions,
     PaymentRequest,
+    PayoutRequest,
+    PayoutResponse,
     QueueRunRequest,
     RunPlanRequest,
     RunRequest,
@@ -39,6 +41,7 @@ from backend.models import (
     WorkOutcome,
     WorkRequest,
 )
+from backend.payout import calculate_claim_payout
 from backend.runs import (
     create_run as create_agent_run,
 )
@@ -91,6 +94,12 @@ def claim(claim_id: str) -> ClaimBundle:
     if bundle is None:
         raise HTTPException(status_code=404, detail="Claim not found")
     return ClaimBundle(**bundle)
+
+
+@app.post("/api/claims/{claim_id}/payout", operation_id="calculate_payout")
+def payout(claim_id: str, request: PayoutRequest) -> PayoutResponse:
+    """Calculate an approved claim's payout using UnderCover's rules."""
+    return calculate_claim_payout(claim_id, request)
 
 
 @app.post("/api/claims/{claim_id}/decision", operation_id="record_decision")

@@ -80,8 +80,38 @@ def test_run_approves_and_pays_a_small_claim(client, monkeypatch):
         ),
         tool_call(
             "5",
-            "calculate_total",
-            {"claim_id": "CLM-1001", "amounts": [245.0, 95.0, 80.0]},
+            "calculate_payout",
+            {
+                "claim_id": "CLM-1001",
+                "benefit": "trip_delay",
+                "lines": [
+                    {
+                        "description": "Hotel",
+                        "amount": 245.0,
+                        "quantity": 1,
+                        "kind": "hotel",
+                        "nights": 1,
+                        "hours": 0.0,
+                    },
+                    {
+                        "description": "Meals",
+                        "amount": 95.0,
+                        "quantity": 1,
+                        "kind": "expense",
+                        "nights": 0,
+                        "hours": 0.0,
+                    },
+                    {
+                        "description": "Local transport",
+                        "amount": 80.0,
+                        "quantity": 1,
+                        "kind": "expense",
+                        "nights": 0,
+                        "hours": 0.0,
+                    },
+                ],
+                "paid_by_others": 0.0,
+            },
         ),
         tool_call(
             "6",
@@ -121,7 +151,7 @@ def test_run_approves_and_pays_a_small_claim(client, monkeypatch):
         "Read claim, policy and customer claim history",
         "Read Policy wording section 3: Trip Delay",
         "Read Claims manual section 4: Working a claim",
-        "Calculated eligible expense total: $420.00",
+        "Calculated payout: $420.00; sign-off not required",
         "Decision recorded: approve for $420.00",
         "Payment recorded: $420.00",
     ]

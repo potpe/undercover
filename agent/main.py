@@ -1,17 +1,17 @@
 """The UnderCover Agent."""
 
-import math
 import os
 from typing import Any, Literal
 
 import httpx
-from dotenv import load_dotenv
 from langchain.agents import create_agent
+from langchain_core.runnables import RunnableConfig
 from langchain_core.tools import tool
 from langchain_openai import ChatOpenAI
 from pydantic import SecretStr
 
-load_dotenv(override=True)
+from agent.tracing import trace_claim
+from backend.models import Benefit, PayoutLine
 
 BACKEND_URL = "http://localhost:8000"
 OPENROUTER_BASE_URL = "https://openrouter.ai/api/v1"
@@ -69,12 +69,36 @@ def read_document_section(
     return response.json()
 
 
-@tool
-def calculate_total(claim_id: str, amounts: list[float]) -> str:
-    """Add eligible USD expense amounts accurately and record the total."""
-    total = math.fsum(amounts)
-    log_activity(claim_id, f"Calculated eligible expense total: ${total:,.2f}")
-    return f"{total:.2f}"
+@tool(parse_docstring=True)
+def calculate_payout(
+    claim_id: str,
+    benefit: Benefit,
+    lines: list[PayoutLine],
+    paid_by_others: float,
+) -> dict[str, Any]:
+    """Work out an approved claim's payout with UnderCover's backend rules.
+
+    Args:
+        claim_id: The claim being worked
+        benefit: The benefit the claim is paid under
+        lines: Every covered item or expense, excluding ineligible lines.
+            Use zero for nights or hours that do not apply.
+        paid_by_others: Total paid or refunded by carriers, hotels or others
+
+    Returns:
+        The calculation, exact payout and whether the backend requires sign-off
+    """
+    with backend() as client:
+        response = client.post(
+            f"/api/claims/{claim_id}/payout",
+            json={
+                "benefit": benefit,
+                "lines": [line.model_dump() for line in lines],
+                "paid_by_others": paid_by_others,
+            },
+        )
+    response.raise_for_status()
+    return response.json()
 
 
 @tool
@@ -136,14 +160,19 @@ def run(claim_id: str, thread_id: str) -> str:
             read_claim,
             search_documents,
             read_document_section,
-            calculate_total,
+            calculate_payout,
             record_claim_decision,
             pay_claim,
         ],
         system_prompt=response.json()["claim"],
     )
-    result = agent.invoke(
-        {"messages": [{"role": "user", "content": f"Work claim {claim_id}"}]},
-        config={"configurable": {"thread_id": thread_id}},
-    )
+    with trace_claim(claim_id, thread_id) as callbacks:
+        config: RunnableConfig = {
+            "configurable": {"thread_id": thread_id},
+            "callbacks": callbacks,
+        }
+        result = agent.invoke(
+            {"messages": [{"role": "user", "content": f"Work claim {claim_id}"}]},
+            config=config,
+        )
     return result["messages"][-1].text

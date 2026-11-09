@@ -6,6 +6,44 @@ ClaimStatus = Literal[
     "waiting", "in_progress", "waiting_for_sign_off", "decided", "left_for_handler"
 ]
 DecisionKind = Literal["approve", "decline", "refer"]
+Benefit = Literal[
+    "trip_cancellation",
+    "trip_interruption",
+    "trip_delay",
+    "baggage_delay",
+    "baggage",
+    "passport",
+    "emergency_medical",
+]
+PayoutLineKind = Literal[
+    "item", "electronics", "cash", "expense", "hotel", "meals_without_receipts"
+]
+
+
+class PayoutLine(BaseModel):
+    description: str = Field(min_length=1)
+    amount: float = Field(ge=0)
+    quantity: int = Field(ge=1)
+    kind: PayoutLineKind
+    nights: int = Field(ge=0)
+    hours: float = Field(ge=0)
+
+
+class PayoutRequest(BaseModel):
+    benefit: Benefit
+    lines: list[PayoutLine]
+    paid_by_others: float = Field(ge=0)
+
+
+class CalculationStep(BaseModel):
+    step: str
+    amount: float
+
+
+class PayoutResponse(BaseModel):
+    calculation: list[CalculationStep]
+    payout: float
+    needs_sign_off: bool
 
 
 class ClaimSummary(BaseModel):
