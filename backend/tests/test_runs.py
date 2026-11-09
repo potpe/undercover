@@ -1,7 +1,8 @@
 import pytest
+from sqlalchemy import update
 
 from backend import main
-from backend.database import connect
+from backend.database import claims_table, connect, run_todos_table
 
 
 @pytest.fixture(autouse=True)
@@ -110,10 +111,9 @@ def test_cap_boundaries_and_smaller_available_queue(client):
 def test_plan_uses_only_available_waiting_claims(client):
     with connect() as connection:
         connection.execute(
-            """
-            UPDATE claims SET status = 'decided'
-            WHERE claim_id NOT IN ('CLM-1001', 'CLM-1002')
-            """
+            update(claims_table)
+            .where(claims_table.c.claim_id.not_in(["CLM-1001", "CLM-1002"]))
+            .values(status="decided")
         )
     run_id = create_run(client, cap=5).json()["run_id"]
 
@@ -143,7 +143,9 @@ def test_current_run_keeps_latest_completed_summary(client):
     plan(client, run_id, ["CLM-1001"])
     with connect() as connection:
         connection.execute(
-            "UPDATE run_todos SET status = 'done' WHERE run_id = ?", (run_id,)
+            update(run_todos_table)
+            .where(run_todos_table.c.run_id == run_id)
+            .values(status="done")
         )
     unfinished = client.post(
         f"/api/runs/{run_id}/finish", json={"summary": "One claim completed."}

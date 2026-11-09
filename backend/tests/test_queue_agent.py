@@ -2,10 +2,11 @@ import httpx
 from fastapi.testclient import TestClient
 from langchain_core.language_models.fake_chat_models import GenericFakeChatModel
 from langchain_core.messages import AIMessage
+from sqlalchemy import update
 
 from agent import queue as queue_agent
 from backend import main
-from backend.database import connect
+from backend.database import claims_table, connect, run_todos_table
 from backend.main import app
 from backend.models import DecisionRequest
 from backend.runs import save_plan
@@ -176,11 +177,14 @@ def test_failed_queue_run_releases_an_in_progress_claim(client, monkeypatch):
         save_plan(run_id, ["CLM-1001"], "stub-model")
         with connect() as connection:
             connection.execute(
-                "UPDATE claims SET status = 'in_progress' WHERE claim_id = 'CLM-1001'"
+                update(claims_table)
+                .where(claims_table.c.claim_id == "CLM-1001")
+                .values(status="in_progress")
             )
             connection.execute(
-                "UPDATE run_todos SET status = 'in_progress' WHERE run_id = ?",
-                (run_id,),
+                update(run_todos_table)
+                .where(run_todos_table.c.run_id == run_id)
+                .values(status="in_progress")
             )
         raise RuntimeError("Queue provider failed")
 

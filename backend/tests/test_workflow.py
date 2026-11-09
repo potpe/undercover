@@ -1,8 +1,7 @@
-import json
-
 import pytest
+from sqlalchemy import select, update
 
-from backend.database import connect
+from backend.database import connect, handlers_table
 
 
 def decide(client, claim_id="CLM-1001", decision="approve", payout=420.0):
@@ -65,12 +64,16 @@ def test_over_limit_payment_waits_for_sign_off(client):
     assert sign_off.status_code == 200
     assert sign_off.json()["signed_off_by"] == "HND-01"
     assert sign_off.json()["paid_amount"] is None
+    assert sign_off.json()["signed_off_at"] is not None
     assert sign_off.json()["claim"]["status"] == "waiting_for_sign_off"
 
     paid = pay(client, claim_id="CLM-1003", amount=3750.0)
     assert paid.status_code == 200
     assert paid.json()["claim"]["status"] == "decided"
     assert paid.json()["paid_amount"] == 3750.0
+    assert paid.json()["signed_off_by"] == "HND-01"
+    assert paid.json()["signed_off_at"] is not None
+    assert paid.json()["paid_at"] is not None
 
 
 def test_exactly_one_thousand_dollars_does_not_need_sign_off(client):
@@ -100,15 +103,14 @@ def test_unknown_and_ineligible_handlers_cannot_sign_off(client):
     assert unknown.status_code == 404
 
     with connect() as connection:
-        handler = json.loads(
-            connection.execute(
-                "SELECT data FROM handlers WHERE handler_id = 'HND-02'"
-            ).fetchone()["data"]
-        )
+        handler = connection.execute(
+            select(handlers_table.c.data).where(handlers_table.c.handler_id == "HND-02")
+        ).scalar_one()
         handler["can_approve_over_limit"] = False
         connection.execute(
-            "UPDATE handlers SET data = ? WHERE handler_id = 'HND-02'",
-            (json.dumps(handler),),
+            update(handlers_table)
+            .where(handlers_table.c.handler_id == "HND-02")
+            .values(data=handler)
         )
     ineligible = client.post(
         "/api/claims/CLM-1003/sign-off", json={"handler_id": "HND-02"}
@@ -154,15 +156,41 @@ def test_negative_payout_is_rejected_without_changing_the_claim(client):
     assert bundle["claim"]["status"] == "waiting"
 
 
-def test_duplicate_payment_is_rejected(client):
+def test_repeated_decision_and_payment_return_the_unchanged_claim(client):
     decide(client)
-    pay(client)
+    paid = pay(client)
+    original = client.get("/api/claims/CLM-1001").json()
 
-    response = pay(client)
+    repeated_decision = decide(client)
+    repeated_payment = pay(client)
 
-    assert response.status_code == 409
-    assert response.json() == {"detail": "Claim already has a payment"}
-    assert client.get("/api/claims/CLM-1001").json()["paid_amount"] == 420.0
+    assert repeated_decision.status_code == 200
+    assert repeated_decision.json() == original
+    assert repeated_payment.status_code == 200
+    assert repeated_payment.json() == original
+    assert repeated_payment.json() == paid.json()
+    assert client.get("/api/claims/CLM-1001").json() == original
+
+
+def test_different_decision_or_payment_on_completed_claim_is_rejected(client):
+    decide(client, decision="decline", payout=0)
+    original = client.get("/api/claims/CLM-1001").json()["decision"]
+
+    changed = decide(client)
+
+    assert changed.status_code == 409
+    assert changed.json() == {"detail": "Claim already has a decision"}
+    assert client.get("/api/claims/CLM-1001").json()["decision"] == original
+
+    decide(client, claim_id="CLM-1002")
+    pay(client, claim_id="CLM-1002")
+    different_payment = pay(client, amount=419, claim_id="CLM-1002")
+
+    assert different_payment.status_code == 409
+    assert different_payment.json() == {
+        "detail": "Payment must equal the approved payout"
+    }
+    assert client.get("/api/claims/CLM-1002").json()["paid_amount"] == 420
 
 
 def test_nonzero_decline_is_rejected(client):
@@ -172,9 +200,10 @@ def test_nonzero_decline_is_rejected(client):
     assert response.json() == {"detail": "Declines and referrals must have zero payout"}
 
 
-def test_workflow_actions_add_ordered_activity(client):
+def test_workflow_actions_add_ordered_activity_once(client):
     decide(client)
     pay(client)
+    decide(client)
     pay(client)
 
     messages = [
@@ -185,7 +214,6 @@ def test_workflow_actions_add_ordered_activity(client):
     assert messages == [
         "Decision recorded: approve for $420.00",
         "Payment recorded: $420.00",
-        "Payment rejected: Claim already has a payment",
     ]
 
 

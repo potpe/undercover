@@ -100,14 +100,14 @@ Move the existing persistence and workflow queries to SQLAlchemy Core, add the e
 
 ### Success criteria
 
-- [ ] Existing backend tests still pass against isolated SQLite: 25 seeded claims, complete bundles, document reads, handlers, runs/to-dos, decisions, sign-off, payments and activity retain their current shape except for the new nullable thread/timestamp fields.
-- [ ] Configuration tests prove that no `DATABASE_URL` selects SQLite without network, while a Postgres URL selects the session-pooler connection with `search_path=undercover`, synchronous operation and a maximum of four pooled connections per process.
-- [ ] Shared Core queries contain no SQLite-only `?` placeholders or Postgres-only SQL; JSON, generated ids, numeric money and timestamps round-trip through the API correctly.
-- [ ] Reseeding twice is intentional and deterministic: each seed leaves exactly 25 waiting claims and empty decisions, payments, sign-offs, runs, to-dos, reads and activity. A separate test proves ordinary initialization does not wipe existing work.
-- [ ] Repeating an identical decision or paid amount returns 200 and the unchanged claim, with one business record and one original success activity; a changed decision/payment returns 409 without altering the original.
-- [ ] The backend still refuses over-limit payment without sign-off, wrong amounts, payment after decline/referral and sign-off by an unknown or ineligible handler.
-- [ ] The Supabase schema/reset logic is covered by SQL construction/fake-connection tests offline; no unit or Playwright test contacts Supabase.
-- [ ] `npm run check:python` passes with at least 80% coverage and `.env` absent.
+- [x] Existing backend tests still pass against isolated SQLite: 25 seeded claims, complete bundles, document reads, handlers, runs/to-dos, decisions, sign-off, payments and activity retain their current shape except for the new nullable thread/timestamp fields.
+- [x] Configuration tests prove that no `DATABASE_URL` selects SQLite without network, while a Postgres URL selects the session-pooler connection with `search_path=undercover`, synchronous operation and a maximum of four pooled connections per process.
+- [x] Shared Core queries contain no SQLite-only `?` placeholders or Postgres-only SQL; JSON, generated ids, numeric money and timestamps round-trip through the API correctly.
+- [x] Reseeding twice is intentional and deterministic: each seed leaves exactly 25 waiting claims and empty decisions, payments, sign-offs, runs, to-dos, reads and activity. A separate test proves ordinary initialization does not wipe existing work.
+- [x] Repeating an identical decision or paid amount returns 200 and the unchanged claim, with one business record and one original success activity; a changed decision/payment returns 409 without altering the original.
+- [x] The backend still refuses over-limit payment without sign-off, wrong amounts, payment after decline/referral and sign-off by an unknown or ineligible handler.
+- [x] The Supabase schema/reset logic is covered by SQL construction/fake-connection tests offline; no unit or Playwright test contacts Supabase.
+- [x] `npm run check:python` passes with at least 80% coverage and `.env` absent.
 
 ## Phase 3: Durable hand-written claim graph
 
