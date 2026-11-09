@@ -76,9 +76,9 @@ def create_run(
     with connect() as connection:
         active = connection.execute(
             select(runs_table.c.run_id).where(runs_table.c.status == "in_progress")
-        ).first()
-        if active:
-            raise HTTPException(status_code=409, detail="Another run is in progress")
+        ).scalar_one_or_none()
+        if active is not None:
+            return require_run(active)
         if target_claim_id:
             target = connection.execute(
                 select(claims_table.c.status).where(
@@ -288,6 +288,19 @@ def fail_work(run_id: int, claim_id: str, error: str) -> dict[str, Any]:
         return work_outcome(run_id, updated, outcome_status)
 
 
+def fail_claim(claim_id: str, error: str) -> None:
+    with connect() as connection:
+        run_id = connection.execute(
+            select(run_todos_table.c.run_id)
+            .where(run_todos_table.c.claim_id == claim_id)
+            .order_by(run_todos_table.c.run_id.desc())
+            .limit(1)
+        ).scalar_one_or_none()
+        if run_id is None:
+            raise HTTPException(status_code=404, detail="Claim has no run to fail")
+    fail_work(run_id, claim_id, error)
+
+
 def selected_work(
     connection: Connection, run_id: int, claim_id: str
 ) -> tuple[RowMapping, RowMapping]:
@@ -318,23 +331,33 @@ def work_claim(
             return work_outcome(run_id, todo)
         if claim["status"] in ("decided", "waiting_for_sign_off"):
             return complete_work(run_id, claim_id, claim_result(claim))
-        if todo["status"] == "in_progress" or claim["status"] != "waiting":
+        resuming = (
+            todo["status"] == "in_progress"
+            and claim["status"] == "in_progress"
+            and claim["agent_thread_id"] is not None
+        )
+        if not resuming and claim["status"] != "waiting":
             raise HTTPException(status_code=409, detail="Claim is already being worked")
         attempt = todo["attempts"] + 1
-        thread_id = f"{run_id}:{claim_id}:attempt-{attempt}"
-        connection.execute(
-            update(claims_table)
-            .where(claims_table.c.claim_id == claim_id)
-            .values(status="in_progress", agent_thread_id=thread_id)
+        thread_id = (
+            claim["agent_thread_id"]
+            if resuming
+            else f"{run_id}:{claim_id}:attempt-{attempt}"
         )
-        connection.execute(
-            update(run_todos_table)
-            .where(
-                run_todos_table.c.run_id == run_id,
-                run_todos_table.c.claim_id == claim_id,
+        if not resuming:
+            connection.execute(
+                update(claims_table)
+                .where(claims_table.c.claim_id == claim_id)
+                .values(status="in_progress", agent_thread_id=thread_id)
             )
-            .values(status="in_progress", error=None)
-        )
+            connection.execute(
+                update(run_todos_table)
+                .where(
+                    run_todos_table.c.run_id == run_id,
+                    run_todos_table.c.claim_id == claim_id,
+                )
+                .values(status="in_progress", error=None)
+            )
 
     reply = None
     error = None

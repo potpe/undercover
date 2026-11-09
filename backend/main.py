@@ -28,6 +28,7 @@ from backend.models import (
     DocumentSectionContent,
     DocumentSectionRequest,
     DocumentSectionSummary,
+    FailureRequest,
     FinishRunRequest,
     Instructions,
     PaymentRequest,
@@ -45,7 +46,14 @@ from backend.payout import calculate_claim_payout
 from backend.runs import (
     create_run as create_agent_run,
 )
-from backend.runs import current_run, finish_run, get_run, save_plan, work_claim
+from backend.runs import (
+    current_run,
+    fail_claim,
+    finish_run,
+    get_run,
+    save_plan,
+    work_claim,
+)
 from backend.workflow import record_decision, record_payment, sign_off
 
 
@@ -123,6 +131,13 @@ def sign_off_claim(
     """Save handler sign-off and ask the agent to resume payment."""
     sign_off(claim_id, request)
     background_tasks.add_task(notify_agent_resume, claim_id)
+    return claim(claim_id)
+
+
+@app.post("/api/claims/{claim_id}/failure", operation_id="fail_claim_recovery")
+def fail_claim_recovery(claim_id: str, request: FailureRequest) -> ClaimBundle:
+    """Return a failed recovered claim to the existing retry workflow."""
+    fail_claim(claim_id, request.error)
     return claim(claim_id)
 
 

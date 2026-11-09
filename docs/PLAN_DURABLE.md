@@ -134,7 +134,7 @@ Separate agent execution from the backend, make saved sign-off trigger a non-blo
 - [x] Agent service run/resume operations have unique operation ids, docstrings and typed responses. A run notification returns immediately, and service tests execute the stored run through stub models.
 - [x] A Python integration test drives an over-limit claim to its interrupt, signs off through the backend and calls the real agent service with a stub model/checkpointer. The claim becomes `in_progress` after sign-off, then decided and paid once with the same thread and attempt count.
 - [x] Sign-off saves handler id/name resolution and `signed_off_at` before notification; payment adds `paid_at`. Backend responses and activity show who signed off and when, and the signing handler cannot be changed by the resume request.
-- [ ] An unavailable agent service leaves the saved sign-off and `in_progress` claim intact, returns the sign-off without waiting for payment, and performs no direct backend/dashboard payment. A later service start recovers it.
+- [x] An unavailable agent service leaves the saved sign-off and `in_progress` claim intact, returns the sign-off without waiting for payment, and performs no direct backend/dashboard payment. A later service start recovers it.
 - [x] The dashboard button changes to a sign-off-only action, never calls `payClaim`, polls the signed-off `in_progress` claim and displays signing handler/time plus paid amount/time when the agent finishes. Existing claim, queue and instruction views still work.
 - [x] Playwright uses a stand-in agent server on port 8003 through `UNDERCOVER_AGENT`; signing off in the browser produces exactly one resume request at that stand-in and never reaches port 8002 or a model. Python tests, not this stand-in, prove actual resume/payment.
 - [x] `npm run check:ts` and `npm run e2e` pass with strict TypeScript, no `any`, at least 80% Vitest coverage and no external service calls.
@@ -145,14 +145,14 @@ Add the shared recovery pass used at agent startup and before every run, and pro
 
 ### Success criteria
 
-- [ ] A stub-model test stops a claim after its first completed graph steps, rebuilds the graph/checkpointer and continues with `invoke(None)` on the same thread. It resumes from the saved next node, keeps attempts unchanged and ends with one decision and at most one payment.
-- [ ] A test that raises a provider error instead follows the existing failure path: attempt one returns to waiting/to-do, the retry has a new thread and only fresh initial messages, and a second real error still leaves the claim for a handler.
-- [ ] Recovery covers an under-limit approval stopped before payment, a signed-off held claim stopped before resume/payment, and a claim whose decision/payment was saved just before the stop; replay changes no decision, amount, handler or timestamps.
-- [ ] A stopped queue run resumes its existing run id, queue thread, plan and cap; remaining to-dos are worked, completed/held items are not duplicated, and the run can then finish with its summary. No second active run is created.
-- [ ] Service startup and `uv run -m agent` both perform recovery before new work. A claim signed off while the agent was down is recovered without another sign-off or attempt.
-- [ ] Repeated run, work, decision, payment and resume requests cannot produce a second decision/payment. Other claims and claims outside the run cap remain unchanged.
-- [ ] Automated tests explicitly clear hosted/model environment variables and use temporary SQLite business/checkpoint state. With `.env` temporarily moved away and restored afterward, `npm run check` is green and makes no Supabase, Langfuse or OpenRouter connection.
-- [ ] Both coverage gates remain at least 80%, all browser tests use the port-8003 stand-in, and no test threshold, lint rule or required check is weakened.
+- [x] A stub-model test stops a claim after its first completed graph steps, rebuilds the graph/checkpointer and continues with `invoke(None)` on the same thread. It resumes from the saved next node, keeps attempts unchanged and ends with one decision and at most one payment.
+- [x] A test that raises a provider error instead follows the existing failure path: attempt one returns to waiting/to-do, the retry has a new thread and only fresh initial messages, and a second real error still leaves the claim for a handler.
+- [x] Recovery covers an under-limit approval stopped before payment, a signed-off held claim stopped before resume/payment, and a claim whose decision/payment was saved just before the stop; replay changes no decision, amount, handler or timestamps.
+- [x] A stopped queue run resumes its existing run id, queue thread, plan and cap; remaining to-dos are worked, completed/held items are not duplicated, and the run can then finish with its summary. No second active run is created.
+- [x] Service startup and `uv run -m agent` both perform recovery before new work. A claim signed off while the agent was down is recovered without another sign-off or attempt.
+- [x] Repeated run, work, decision, payment and resume requests cannot produce a second decision/payment. Other claims and claims outside the run cap remain unchanged.
+- [x] Automated tests explicitly clear hosted/model environment variables and use temporary SQLite business/checkpoint state. With `.env` temporarily moved away and restored afterward, `npm run check` is green and makes no Supabase, Langfuse or OpenRouter connection.
+- [x] Both coverage gates remain at least 80%, all browser tests use the port-8003 stand-in, and no test threshold, lint rule or required check is weakened.
 
 ## Phase 6: Documentation and hosted five-claim verification
 

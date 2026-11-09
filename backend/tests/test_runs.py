@@ -157,6 +157,18 @@ def test_current_run_keeps_latest_completed_summary(client):
     assert specific.json()["todos"][0]["status"] == "done"
 
 
+def test_next_run_resumes_the_existing_active_run(client):
+    first = create_run(client, cap=2, thread_id="original")
+
+    resumed = create_run(client, cap=5, thread_id="replacement")
+
+    assert resumed.status_code == 202
+    assert resumed.json()["run_id"] == first.json()["run_id"]
+    assert resumed.json()["thread_id"] == "original"
+    assert resumed.json()["claim_cap"] == 2
+    assert len(client.get("/api/claims").json()) == 25
+
+
 def test_current_run_is_null_before_the_first_run(client):
     response = client.get("/api/runs/current")
 

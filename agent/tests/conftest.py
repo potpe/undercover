@@ -8,6 +8,15 @@ from backend.main import app
 @pytest.fixture
 def client(tmp_path, monkeypatch):
     monkeypatch.setenv("DATABASE_PATH", str(tmp_path / "undercover-agent-test.db"))
+    for key in (
+        "DATABASE_URL",
+        "LANGFUSE_SECRET_KEY",
+        "LANGFUSE_PUBLIC_KEY",
+        "LANGFUSE_BASE_URL",
+        "OPENROUTER_API_KEY",
+        "MODEL_NAME",
+    ):
+        monkeypatch.delenv(key, raising=False)
 
     class Accepted:
         def raise_for_status(self):

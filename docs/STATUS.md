@@ -1,6 +1,6 @@
 # Status
 
-The durable-state build is in progress. Phase 4 is implemented; automatic recovery is next.
+The durable-state build is in progress. Phases 1 through 5 are complete.
 
 - `backend/`: FastAPI and SQLAlchemy Core, using SQLite by default or Supabase Postgres when `DATABASE_URL` is set. Postgres uses the `undercover` schema and at most four pooled connections per process. APIs cover claims, section-level policy/manual reads, deterministic rule-based payouts, capped runs, durable to-dos, attempts, decisions, activity, sign-off, payment and summaries. Payments over $1,000 stay blocked until sign-off. First failures return claims to Waiting; second failures leave them for a handler; completed work cannot be repeated.
 - `agent/`: a hand-written synchronous LangGraph claim graph with API-only claim, document and payout tools, structured decisions, interrupt/resume and graph-owned payment. The queue agent remains LangChain `create_agent`. Checkpoints use Supabase `PostgresSaver` or local SQLite, with sync durability and stable claim/thread Langfuse sessions. The default is `deepseek/deepseek-v4.1-flash` with low reasoning; `MODEL_NAME` overrides it.
@@ -45,4 +45,4 @@ This runs Ruff, Pyright, pytest with at least 80% coverage, Prettier, ESLint, ts
 
 After reseeding, the real DeepSeek V4.1 Flash run with cap five completed `CLM-1001` through `CLM-1005` on the first attempt and left the other 20 claims waiting. `CLM-1001` used the calculator tool to record and pay exactly $420.00; `CLM-1003` approved $3,750.00 and remained unpaid pending sign-off. Each claim recorded its activity and sections read, and the final browser check had no console errors. The student's original `MODEL_NAME` override was restored after the live check.
 
-Durable Phase 4: 85 Python tests passed with 94.38% coverage; 17 Vitest tests passed with 91.93% statement coverage; seven Playwright tests passed using the agent stand-in. A local smoke test started backend 8000, agent 8002 and dashboard 5173 without hosted services. Automatic recovery is implemented in Phase 5.
+Durable Phase 5: with `.env` absent, `npm run check` passed 91 Python tests at 92.90% coverage, 17 Vitest tests at 91.93% statement coverage and seven Playwright tests. Tests prove same-thread checkpoint recovery without a new attempt, fresh retries after real errors, signed-off work recovered after downtime, and stopped queue runs finishing with their original plan.

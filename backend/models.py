@@ -107,6 +107,10 @@ class WorkRequest(BaseModel):
     claim_id: str = Field(min_length=1)
 
 
+class FailureRequest(BaseModel):
+    error: str = Field(min_length=1)
+
+
 class WorkOutcome(BaseModel):
     run_id: int
     claim_id: str
