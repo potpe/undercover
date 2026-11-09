@@ -8,17 +8,19 @@ UnderCover sells travel insurance on three plans: Economy, Premium and First. Ou
 
 ## The agent harness
 
-The UnderCover Agent works the queue the way a handler does. One queue run can cover every waiting claim or stop at a chosen claim cap; a named waiting claim can also be run on its own. The queue agent chooses the order and keeps a durable to-do list. Each claim is worked by a fresh claim subagent with no earlier claims in its context.
+The UnderCover Agent works the queue the way a handler does. One queue run can cover every waiting claim or stop at a chosen claim cap; a named waiting claim can also be run on its own. The queue agent chooses the order and keeps a durable to-do list. Each claim attempt uses its own claim graph and thread, with no earlier claims in its context.
 
-For each claim the subagent should:
+For each claim the graph should:
 
 - read the claim, the customer's policy and claim history, and every supporting document
 - find and read the relevant sections of the policy wording and claims manual rather than receiving whole documents
 - approve, decline or refer the claim
-- work out the payout when it approves
+- use the backend's payout rules when it approves
 - explain the decision in two or three sentences, along with the relevant section of the policy
 
-A failure before a decision returns the claim to the queue for one fresh retry. After a second failure, the claim is left for a handler. One failed claim does not stop the run, and no claim is decided or paid twice. Before finishing, the queue agent checks every selected claim and gives handlers a short summary.
+The graph records the decision and owns the payment step. An approval that needs no sign-off is paid immediately. An approval over the limit pauses with its work saved until a handler signs off; the agent then resumes the same thread and pays it. Sign-off is saved even if the agent is temporarily unavailable.
+
+If the agent is stopped partway through, the next run carries on from the latest saved step with the same thread and no new attempt. A claim that fails with an error instead returns to the queue for one fresh retry. After a second failure, the claim is left for a handler. One failed claim does not stop the run, a stopped queue run is finished by the next run, and no claim is decided or paid twice. Before finishing, the queue agent checks every selected claim and gives handlers a short summary.
 
 Our goal is to handle claims straight through, as accurately as our handlers do.
 

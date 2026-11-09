@@ -1,6 +1,8 @@
 # Process
 
-`uv sync` and `npm install` at the repo root install everything, including a git pre-commit hook. `npm run dev` starts the backend and the dashboard.
+`uv sync` and `npm install` at the repo root install everything, including a git pre-commit hook. `npm run dev` starts the backend on port 8000, the agent service on port 8002 and the dashboard on port 5173, passing `.env` to the Python services. `uv run -m agent` starts a capped run through the same agent entry point.
+
+Stop the services before `npm run seed`, which intentionally resets the database selected by `DATABASE_URL` or `DATABASE_PATH`, including checkpoint state. Normal startup never reseeds existing work. Tests use isolated SQLite and stubs without loading `.env`; no Supabase, Langfuse or OpenRouter connection is needed.
 
 `npm run check` runs every check:
 
@@ -39,4 +41,4 @@ When the last phase is done, run `npm run check` and report the results.
 - Keep `docs/STATUS.md` up to date.
 - Never push.
 - Don't open `data/evals/` unless you're asked to.
-- Everything must work on Windows: write `package.json` scripts as `uv run` commands or `.mjs` files.
+- Everything must work on Windows: write `package.json` scripts as `uv run` commands or `.mjs` files. Keep the agent and its Postgres checkpoint connection synchronous because async Postgres connections do not work with Windows' default event loop.
