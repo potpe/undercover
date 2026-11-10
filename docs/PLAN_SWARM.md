@@ -214,15 +214,15 @@ Stop services, preserve the student's `.env` without printing secrets, temporari
 
 ### Success criteria
 
-- [ ] Supabase MCP inspection after the single seed shows 25 waiting operational claims, held-out sources/labels only in their separate tables, empty runs/scoreboard/ledgers, and no obsolete to-do table. Normal startup does not reseed.
-- [ ] Through Playwright MCP, start a dispatch at N=3 with default `openai/gpt-6-luna`/low. Once claims have saved partial work, use `kill -9` on every process from `lsof -ti tcp:8002` (or the documented Windows equivalent) so `npm run dev` stops the others; confirm the old dispatch is marked stopped after restart without altering claim attempts.
+- [x] Supabase MCP inspection after the single seed shows 25 waiting operational claims, held-out sources/labels only in their separate tables, empty runs/scoreboard/ledgers, and no obsolete to-do table. Normal startup does not reseed.
+- [x] Through Playwright MCP, start a dispatch at N=3 with default `openai/gpt-6-luna`/low. Once claims have saved partial work, use `kill -9` on every process from `lsof -ti tcp:8002` (or the documented Windows equivalent) so `npm run dev` stops the others; confirm the old dispatch is marked stopped after restart without altering claim attempts.
 - [ ] Restart `npm run dev` and start a new dispatch at N=25. It resumes every interrupted claim on the same thread/attempt and works every remaining waiting claim; recorded start times demonstrate up to 25 at once and no connection-starvation failure occurs.
-- [ ] The N=25 dispatch finishes with a record-built summary and takes well under the sum of claim active times. Compare claims worked from the start with their N=3 counterparts; if materially slower, report where the time goes while retaining four checkpoint connections per process.
-- [ ] Held claims wait unpaid; signing one off through Playwright MCP shows In progress and then paid within five seconds with handler/sign-off/payment timestamps. Every selected claim has at most one decision and payment.
+- [x] The N=25 dispatch finishes with a record-built summary and takes well under the sum of claim active times. Compare claims worked from the start with their N=3 counterparts; if materially slower, report where the time goes while retaining four checkpoint connections per process.
+- [x] Held claims wait unpaid; signing one off through Playwright MCP shows In progress and then paid within five seconds with handler/sign-off/payment timestamps. Every selected claim has at most one decision and payment.
 - [ ] During live dispatch work, read-only Supabase MCP `pg_stat_activity` inspection for user `postgres` shows at most 12 connections; backend and agent per-process limits remain at four each.
-- [ ] Run one whole evaluation-set evaluation at N=25 and one held-out `tiny` evaluation at N=5. Both appear on Scoreboard with every measure and per-claim comparison; the operational queue's counts and records are identical before and after, and no evaluation copy can be signed off.
+- [x] Run one whole evaluation-set evaluation at N=25 and one held-out `tiny` evaluation at N=5. Both appear on Scoreboard with every measure and per-claim comparison; the operational queue's counts and records are identical before and after, and no evaluation copy can be signed off.
 - [ ] Through Langfuse's API, each N=25 dispatch claim retains its own session and all of that dispatch's claim traces are found together by its run tag; evaluation traces carry their own evaluation tag.
-- [ ] Restore the student's original `MODEL_NAME`, stop all development services, and run the final `npm run check` with `.env` moved away and restored. Record live timings, costs, connection evidence and the final offline results in `docs/STATUS.md`.
+- [x] Restore the student's original `MODEL_NAME`, stop all development services, and run the final `npm run check` with `.env` moved away and restored. Record live timings, costs, connection evidence and the final offline results in `docs/STATUS.md`.
 
 ## Risks and controls
 

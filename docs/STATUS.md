@@ -1,6 +1,6 @@
 # Status
 
-The swarm and scoreboard build is implemented through Phase 5. Hosted verification is pending.
+The swarm and scoreboard implementation is complete. Offline checks pass; hosted acceptance has remaining provider/connection limitations documented below.
 
 - `backend/`: FastAPI and SQLAlchemy Core on SQLite offline or Supabase Postgres. APIs cover claims, document reads, deterministic payouts, dispatches, evaluations, usage/time ledgers, decisions, sign-off, payment and record-built summaries/scores. The backend enforces the $1,000 sign-off rule and idempotent writes. Handler sources and decisions are backend-only.
 - `agent/`: a synchronous durable claim graph plus a model-free LangGraph dispatcher using `Send`, N-way concurrency and targeted retries. Claim threads and attempts survive stopped runs. A process-wide synchronous pool caps checkpoint connections at four with a separate saver per claim. Langfuse keeps claim/thread sessions and adds run tags.
@@ -55,4 +55,10 @@ This runs Ruff, Pyright, pytest with at least 80% coverage, Prettier, ESLint, ts
 
 ## Verification
 
-Final offline gate: with `.env` absent, `npm run check` passed 102 Python tests at 93.49% coverage, 28 Vitest tests at 90.14% statement coverage and ten Playwright tests without hosted/model calls. Additional regressions cover atomic pool initialization, named-thread persistence, current-run usage after resume, startup cleanup ordering and terminal evaluation cleanup. Playwright MCP review found no console errors or horizontal overflow at desktop/mobile sizes across dispatch, Scoreboard, evaluation copy and instructions. The one-seed Luna/Supabase/Langfuse verification remains to be recorded.
+Final offline gate: with `.env` absent, `npm run check` passed 102 Python tests at 93.50% coverage, 28 Vitest tests at 90.14% statement coverage and ten Playwright tests without hosted/model calls. Additional regressions cover atomic pool initialization, named-thread persistence, current-run usage after resume, startup cleanup ordering and terminal evaluation cleanup. Playwright MCP review found no console errors or horizontal overflow at desktop/mobile sizes across dispatch, Scoreboard, evaluation copy and instructions.
+
+Live verification used one Supabase seed and default Luna/low. The stopped N=3 run became `stopped` with its three interrupted claims' threads and zero attempts preserved. The subsequent N=25 work completed its remaining dispatch with a record-built summary in 39.13 seconds against 187.83 seconds of accumulated claim work. Provider in-flight-budget responses and session-pooler pressure caused real retries/handoffs; a killed N=3 claim has no final work period, so a like-for-like timing comparison is unavailable. The backend pool was reduced to two connections to leave headroom, while the claim checkpoint pool remains capped at four. Observed `postgres` connection counts ranged from 10 to 17; the 17-connection peak and associated failures mean the hosted connection criterion remains unchecked.
+
+`CLM-1008` waited for Dana's sign-off and paid $2,240.00 after 2.03 seconds with one decision/payment. The whole evaluation at N=25 and held-out tiny evaluation at N=5 completed with every measure; the operational queue was byte-for-byte unchanged. Langfuse's v2 observations API found 25 traces by `evaluation-4` and also found the `evaluation-5` traces. The earlier full N=25 dispatch was worked before the trace-propagation fix, so its whole-dispatch tag criterion remains unchecked rather than being backfilled.
+
+`MODEL_NAME=openrouter/free` was restored and live services were stopped. Supabase continues to report RLS disabled on `undercover` tables; review access policies before client exposure.
