@@ -4,6 +4,7 @@ import os
 import sqlite3
 from collections.abc import Iterator
 from contextlib import contextmanager
+from threading import BoundedSemaphore
 from typing import Any, cast
 
 import psycopg
@@ -15,9 +16,17 @@ from psycopg.rows import DictRow, dict_row
 
 from backend.database import database_path
 
+CHECKPOINT_SLOTS = BoundedSemaphore(4)
+
 
 @contextmanager
 def claim_checkpointer() -> Iterator[BaseCheckpointSaver]:
+    with CHECKPOINT_SLOTS, open_claim_checkpointer() as checkpointer:
+        yield checkpointer
+
+
+@contextmanager
+def open_claim_checkpointer() -> Iterator[BaseCheckpointSaver]:
     database_url = os.getenv("DATABASE_URL")
     if database_url:
         connection = cast(

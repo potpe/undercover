@@ -1,6 +1,7 @@
 from collections.abc import Callable
 from typing import Any
 
+import httpx
 from fastapi import HTTPException
 from sqlalchemy import Connection, RowMapping, func, insert, select, update
 
@@ -363,6 +364,14 @@ def work_claim(
     error = None
     try:
         reply = runner(claim_id, thread_id)
+    except httpx.TransportError as caught:
+        return {
+            "run_id": run_id,
+            "claim_id": claim_id,
+            "status": "in_progress",
+            "attempts": todo["attempts"],
+            "result": str(caught) or "Agent connection interrupted; resume next run",
+        }
     except Exception as caught:
         error = str(caught)
 

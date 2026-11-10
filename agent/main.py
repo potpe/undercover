@@ -150,7 +150,7 @@ def model() -> ChatOpenAI:
         api_key=SecretStr(os.environ["OPENROUTER_API_KEY"]),
         reasoning_effort=None if name else "low",
         timeout=60,
-        max_completion_tokens=4096,
+        max_completion_tokens=8192,
     )
 
 
@@ -311,6 +311,14 @@ def run(claim_id: str, thread_id: str) -> str:
         with trace_claim(claim_id, thread_id) as callbacks:
             config["callbacks"] = callbacks
             result = graph.invoke(graph_input, config, durability="sync")
+            if "__interrupt__" in result:
+                bundle = current_bundle(claim_id)
+                if bundle["signed_off_by"]:
+                    result = graph.invoke(
+                        Command(resume={"handler_id": bundle["signed_off_by"]}),
+                        config,
+                        durability="sync",
+                    )
         if "result" in result:
             return result["result"]
         return result["messages"][-1].text

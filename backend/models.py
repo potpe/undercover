@@ -114,7 +114,7 @@ class FailureRequest(BaseModel):
 class WorkOutcome(BaseModel):
     run_id: int
     claim_id: str
-    status: Literal["retry", "done", "left_for_handler"]
+    status: Literal["retry", "done", "left_for_handler", "in_progress"]
     attempts: int
     result: str
 

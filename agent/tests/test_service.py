@@ -1,3 +1,6 @@
+import time
+from concurrent.futures import ThreadPoolExecutor
+
 from fastapi.testclient import TestClient
 from langchain_core.messages import AIMessage
 
@@ -35,6 +38,32 @@ def tool_call(call_id, name, args):
     return AIMessage(
         content="", tool_calls=[{"name": name, "args": args, "id": call_id}]
     )
+
+
+def test_same_claim_work_is_serialized(monkeypatch):
+    active = 0
+    maximum = 0
+
+    def fake_claim_run(claim_id, thread_id):
+        nonlocal active, maximum
+        active += 1
+        maximum = max(maximum, active)
+        time.sleep(0.05)
+        active -= 1
+        return f"{claim_id}:{thread_id}"
+
+    monkeypatch.setattr(service, "claim_run", fake_claim_run)
+
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        results = list(
+            pool.map(
+                lambda index: service.run_claim_locked("CLM-1001", f"thread-{index}"),
+                range(2),
+            )
+        )
+
+    assert maximum == 1
+    assert results == ["CLM-1001:thread-0", "CLM-1001:thread-1"]
 
 
 def test_service_openapi_is_documented(client):

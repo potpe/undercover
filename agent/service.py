@@ -1,8 +1,9 @@
 """The UnderCover Agent's separate web service."""
 
+import time
 from collections.abc import AsyncIterator
-from contextlib import asynccontextmanager, suppress
-from threading import Thread
+from contextlib import asynccontextmanager
+from threading import Lock, Thread
 from typing import Literal
 
 import httpx
@@ -13,6 +14,10 @@ from agent.main import backend, current_bundle
 from agent.main import run as claim_run
 from agent.queue import run as queue_run
 from backend.runs import fail_queue_run
+
+STARTUP_ATTEMPTS = 10
+_claim_locks: dict[str, Lock] = {}
+_run_locks: dict[int, Lock] = {}
 
 
 class ClaimWorkRequest(BaseModel):
@@ -27,6 +32,12 @@ class AcceptedResponse(BaseModel):
     status: Literal["accepted"]
 
 
+def run_claim_locked(claim_id: str, thread_id: str) -> str:
+    lock = _claim_locks.setdefault(claim_id, Lock())
+    with lock:
+        return claim_run(claim_id, thread_id)
+
+
 def report_failure(claim_id: str, error: str) -> None:
     with backend() as client:
         response = client.post(f"/api/claims/{claim_id}/failure", json={"error": error})
@@ -39,8 +50,15 @@ def resume_claim(claim_id: str) -> str:
     if not thread_id:
         raise RuntimeError("Claim has no saved agent thread")
     try:
-        return claim_run(claim_id, thread_id)
+        return run_claim_locked(claim_id, thread_id)
     except Exception as error:
+        bundle = current_bundle(claim_id)
+        if bundle["claim"]["status"] in ("decided", "waiting_for_sign_off"):
+            decision = bundle["decision"]
+            result = f"{claim_id}: {decision['decision']} ${decision['payout']:,.2f}"
+            if bundle["paid_amount"] is not None:
+                result += "; payment recorded"
+            return result
         report_failure(claim_id, str(error))
         return str(error)
 
@@ -66,12 +84,14 @@ def recover_work() -> None:
         run_stored_run(run["run_id"])
 
 
-def run_stored_run(run_id: int) -> str:
+def execute_stored_run(run_id: int) -> str:
     recover_signed_off_claims()
     with backend() as client:
         response = client.get(f"/api/runs/{run_id}")
     response.raise_for_status()
     run = response.json()
+    if run["status"] != "in_progress":
+        return run["summary"] or run["status"]
     try:
         result = queue_run(run_id, run["thread_id"])
         with backend() as client:
@@ -85,11 +105,22 @@ def run_stored_run(run_id: int) -> str:
         return str(error)
 
 
+def run_stored_run(run_id: int) -> str:
+    lock = _run_locks.setdefault(run_id, Lock())
+    with lock:
+        return execute_stored_run(run_id)
+
+
 @asynccontextmanager
 async def lifespan(_: FastAPI) -> AsyncIterator[None]:
     def recover() -> None:
-        with suppress(httpx.HTTPError):
-            recover_work()
+        for attempt in range(STARTUP_ATTEMPTS):
+            try:
+                recover_work()
+                return
+            except httpx.HTTPError:
+                if attempt + 1 < STARTUP_ATTEMPTS:
+                    time.sleep(0.5)
 
     recovery = Thread(target=recover)
     recovery.start()
@@ -111,7 +142,7 @@ def health() -> dict[str, str]:
 @app.post("/claims/{claim_id}/work", operation_id="work_claim")
 def work(claim_id: str, request: ClaimWorkRequest) -> ClaimWorkResponse:
     """Work one claim on its supplied durable thread."""
-    return ClaimWorkResponse(result=claim_run(claim_id, request.thread_id))
+    return ClaimWorkResponse(result=run_claim_locked(claim_id, request.thread_id))
 
 
 @app.post("/claims/{claim_id}/resume", operation_id="resume_claim", status_code=202)

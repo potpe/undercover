@@ -1,3 +1,4 @@
+import httpx
 import pytest
 from fastapi.testclient import TestClient
 from langchain_core.language_models.fake_chat_models import GenericFakeChatModel
@@ -8,7 +9,7 @@ from agent import main, queue, service
 from backend import main as backend_main
 from backend.database import claims_table, connect
 from backend.models import DecisionRequest
-from backend.runs import work_claim
+from backend.runs import complete_work, finish_run, work_claim
 from backend.workflow import record_decision
 
 
@@ -291,6 +292,56 @@ def test_signoff_saved_while_agent_is_down_is_recovered(client, monkeypatch):
     activity = [entry["message"] for entry in paid["activity"]]
     assert activity.count("Decision recorded: approve for $3,750.00") == 1
     assert activity.count("Payment recorded: $3,750.00") == 1
+
+
+def test_resume_failure_does_not_reopen_a_paid_claim(client, monkeypatch):
+    monkeypatch.setattr(main, "backend", lambda: TestClient(backend_main.app))
+    monkeypatch.setattr(service, "backend", lambda: TestClient(backend_main.app))
+    created = client.post("/api/runs", json={"thread_id": "paid", "claim_cap": 1})
+    run_id = created.json()["run_id"]
+    client.post(
+        f"/api/runs/{run_id}/plan",
+        json={"claim_ids": ["CLM-1001"], "model_name": "stub-model"},
+    )
+    record_decision("CLM-1001", approval())
+    main.save_payment("CLM-1001", 420)
+    with connect() as connection:
+        connection.execute(
+            update(claims_table)
+            .where(claims_table.c.claim_id == "CLM-1001")
+            .values(agent_thread_id="paid-thread")
+        )
+    complete_work(run_id, "CLM-1001", "CLM-1001: approve $420.00; payment recorded")
+    finish_run(run_id, "1 claim done")
+    original = client.get("/api/claims/CLM-1001").json()
+    original_run = client.get(f"/api/runs/{run_id}").json()
+
+    def fail_after_payment(claim_id, thread_id):
+        raise RuntimeError("Checkpoint response lost after payment")
+
+    monkeypatch.setattr(service, "claim_run", fail_after_payment)
+    result = service.resume_claim("CLM-1001")
+
+    assert result == "CLM-1001: approve $420.00; payment recorded"
+    assert client.get("/api/claims/CLM-1001").json() == original
+    assert client.get(f"/api/runs/{run_id}").json() == original_run
+
+
+def test_startup_recovery_retries_until_backend_is_ready(monkeypatch):
+    calls = []
+
+    def recover_with_initial_outage():
+        calls.append("recover")
+        if len(calls) == 1:
+            raise httpx.ConnectError("Backend not ready")
+
+    monkeypatch.setattr(service, "recover_work", recover_with_initial_outage)
+    monkeypatch.setattr("agent.service.time.sleep", lambda seconds: None)
+
+    with TestClient(service.app):
+        pass
+
+    assert calls == ["recover", "recover"]
 
 
 def test_service_startup_recovers_saved_work(monkeypatch):

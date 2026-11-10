@@ -1,3 +1,5 @@
+import httpx
+
 from backend import main
 from backend.models import DecisionRequest, PaymentRequest
 from backend.workflow import record_decision, record_payment
@@ -202,6 +204,40 @@ def test_interruption_after_decision_recovers_payment_without_duplicate(
 
     work(client, run_id)
     assert len(calls) == 1
+
+
+def test_agent_transport_interruption_preserves_attempt_and_thread(client, monkeypatch):
+    run_id = planned_run(client)
+    calls = []
+
+    def interrupted(claim_id, thread_id):
+        calls.append(thread_id)
+        raise httpx.ReadTimeout("Agent connection interrupted")
+
+    monkeypatch.setattr(main, "run_claim_via_service", interrupted)
+
+    first = work(client, run_id)
+
+    assert first.json()["status"] == "in_progress"
+    assert first.json()["attempts"] == 0
+    bundle = client.get("/api/claims/CLM-1001").json()
+    assert bundle["claim"]["status"] == "in_progress"
+    thread_id = bundle["agent_thread_id"]
+    assert client.get(f"/api/runs/{run_id}").json()["todos"][0]["status"] == (
+        "in_progress"
+    )
+
+    monkeypatch.setattr(
+        main,
+        "run_claim_via_service",
+        lambda claim_id, thread_id: approve(claim_id) or "Done",
+    )
+    second = work(client, run_id)
+
+    assert second.json()["status"] == "done"
+    assert second.json()["attempts"] == 0
+    assert calls == [thread_id]
+    assert client.get("/api/claims/CLM-1001").json()["agent_thread_id"] == thread_id
 
 
 def test_normal_return_without_decision_is_a_retryable_failure(client, monkeypatch):

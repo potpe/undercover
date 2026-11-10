@@ -1,3 +1,5 @@
+from types import SimpleNamespace
+
 from fastapi.testclient import TestClient
 from langchain_core.messages import AIMessage
 
@@ -248,6 +250,40 @@ def test_graph_interrupts_and_resumes_an_over_limit_claim(client, monkeypatch):
     assert client.get("/api/claims/CLM-1003").json() == bundle
 
 
+def test_signoff_at_new_interrupt_resumes_payment_in_the_same_run(client, monkeypatch):
+    use_backend(monkeypatch)
+    calls = []
+
+    class FakeGraph:
+        def get_state(self, config):
+            return SimpleNamespace(
+                created_at="2026-11-10T00:00:00Z",
+                next=("approval",),
+                interrupts=(),
+                values={"result": "waiting"},
+            )
+
+        def invoke(self, inputs, config, durability):
+            calls.append(inputs)
+            if len(calls) == 1:
+                return {"__interrupt__": [object()], "result": "waiting"}
+            assert inputs.resume == {"handler_id": "HND-01"}
+            return {"result": "CLM-1003: approve $3,750.00; payment recorded"}
+
+    graph = FakeGraph()
+    monkeypatch.setattr(main, "model", lambda: StubModel(messages=iter([])))
+    monkeypatch.setattr(main, "build_claim_graph", lambda *args: graph)
+    monkeypatch.setattr(
+        main, "current_bundle", lambda claim_id: {"signed_off_by": "HND-01"}
+    )
+
+    result = main.run("CLM-1003", "approval-boundary")
+
+    assert result == "CLM-1003: approve $3,750.00; payment recorded"
+    assert len(calls) == 2
+    assert calls[0] is None
+
+
 def test_tool_refusal_returns_to_the_model(client, monkeypatch):
     use_backend(monkeypatch)
     replies = [
@@ -325,7 +361,7 @@ def test_model_name(monkeypatch):
     monkeypatch.delenv("MODEL_NAME", raising=False)
     assert main.model().model_name == "deepseek/deepseek-v4.1-flash"
     assert main.model().reasoning_effort == "low"
-    assert main.model().model_dump()["max_tokens"] == 4096
+    assert main.model().model_dump()["max_tokens"] == 8192
     monkeypatch.setenv("MODEL_NAME", "openrouter/free")
     assert main.model().model_name == "openrouter/free"
     assert main.model().reasoning_effort is None

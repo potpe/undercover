@@ -1,7 +1,8 @@
 import pytest
 from sqlalchemy import select, update
+from sqlalchemy.dialects import postgresql
 
-from backend.database import connect, handlers_table
+from backend.database import claims_table, connect, handlers_table
 
 
 def decide(client, claim_id="CLM-1001", decision="approve", payout=420.0):
@@ -215,6 +216,16 @@ def test_workflow_actions_add_ordered_activity_once(client):
         "Decision recorded: approve for $420.00",
         "Payment recorded: $420.00",
     ]
+
+
+def test_postgres_claim_guards_lock_the_row_for_atomic_writes():
+    statement = (
+        select(claims_table)
+        .where(claims_table.c.claim_id == "CLM-1001")
+        .with_for_update()
+    )
+
+    assert "FOR UPDATE" in statement.compile(dialect=postgresql.dialect()).string
 
 
 def test_workflow_returns_404_for_unknown_claim(client):

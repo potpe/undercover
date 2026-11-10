@@ -40,7 +40,9 @@ def approval_limit(connection: Connection) -> float:
 def claim_row(connection: Connection, claim_id: str) -> RowMapping:
     row = (
         connection.execute(
-            select(claims_table).where(claims_table.c.claim_id == claim_id)
+            select(claims_table)
+            .where(claims_table.c.claim_id == claim_id)
+            .with_for_update()
         )
         .mappings()
         .first()

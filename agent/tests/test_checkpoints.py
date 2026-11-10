@@ -1,3 +1,6 @@
+import time
+from concurrent.futures import ThreadPoolExecutor
+
 from agent.checkpoints import claim_checkpointer
 
 
@@ -9,6 +12,26 @@ def test_sqlite_checkpointer_persists_across_connections(tmp_path, monkeypatch):
         assert first.__class__.__name__ == "SqliteSaver"
     with claim_checkpointer() as second:
         assert second.__class__.__name__ == "SqliteSaver"
+
+
+def test_checkpoint_connections_are_limited_to_four_per_process(tmp_path, monkeypatch):
+    monkeypatch.setenv("DATABASE_PATH", str(tmp_path / "checkpoints.db"))
+    monkeypatch.delenv("DATABASE_URL", raising=False)
+    active = 0
+    maximum = 0
+
+    def enter_checkpoint():
+        nonlocal active, maximum
+        with claim_checkpointer():
+            active += 1
+            maximum = max(maximum, active)
+            time.sleep(0.02)
+            active -= 1
+
+    with ThreadPoolExecutor(max_workers=5) as pool:
+        list(pool.map(lambda _: enter_checkpoint(), range(5)))
+
+    assert maximum == 4
 
 
 def test_postgres_checkpointer_uses_lab_connection_settings(monkeypatch):
