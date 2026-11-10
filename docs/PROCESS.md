@@ -1,8 +1,8 @@
 # Process
 
-`uv sync` and `npm install` at the repo root install everything, including a git pre-commit hook. `npm run dev` starts the backend on port 8000, the agent service on port 8002 and the dashboard on port 5173, passing `.env` to the Python services. `uv run -m agent` starts a capped run through the same agent entry point.
+`uv sync` and `npm install` at the repo root install everything, including a git pre-commit hook. `npm run dev` starts the backend on port 8000, the agent service on port 8002 and the dashboard on port 5173, passing `.env` to the Python services. On the queue page, choose 1–25 agents at once (default 3) and start a dispatch; N limits concurrency, not the number of waiting/interrupted claims. On Scoreboard, choose the evaluation or held-out set, whole or five `tiny` claims, and N. Only one dispatch/evaluation runs at once. `uv run -m agent CLM-1001` works one named claim with no run; bare `uv run -m agent` is invalid.
 
-Stop the services before `npm run seed`, which intentionally resets the database selected by `DATABASE_URL` or `DATABASE_PATH`, including checkpoint state. Normal startup never reseeds existing work. Tests use isolated SQLite and stubs without loading `.env`; no Supabase, Langfuse or OpenRouter connection is needed.
+Stop the services before `npm run seed`, which intentionally resets the database selected by `DATABASE_URL` or `DATABASE_PATH`, including claims, runs, the scoreboard, ledgers and checkpoint state. It restores 25 waiting operational claims plus the separate held-out sources and handler labels. Normal startup never reseeds existing work. Evaluations create their own copies and need no reseed. Tests use isolated SQLite and stubs without loading `.env`; no Supabase, Langfuse or OpenRouter connection is needed.
 
 `npm run check` runs every check:
 

@@ -10,9 +10,10 @@ import {
 import { ClaimWorkspace } from "./ClaimWorkspace";
 import { formatClaimType, formatMoney } from "./format";
 import { RunPanel } from "./RunPanel";
+import { Scoreboard } from "./Scoreboard";
 import { StatusBadge } from "./StatusBadge";
 
-type View = "queue" | "instructions";
+type View = "queue" | "scoreboard" | "instructions";
 
 function QueueView({
   onSelect,
@@ -225,6 +226,15 @@ export function App() {
       />
     );
   }
+  if (view === "scoreboard")
+    mainContent = (
+      <Scoreboard
+        onSelectClaim={(claimId) => {
+          setSelectedClaim(claimId);
+          setView("queue");
+        }}
+      />
+    );
   if (view === "instructions") mainContent = <InstructionsView />;
 
   return (
@@ -250,6 +260,17 @@ export function App() {
             }}
           >
             Claims
+          </button>
+          <button
+            type="button"
+            className={view === "scoreboard" ? "nav-active" : ""}
+            aria-current={view === "scoreboard" ? "page" : undefined}
+            onClick={() => {
+              setView("scoreboard");
+              setSelectedClaim(null);
+            }}
+          >
+            Scoreboard
           </button>
           <button
             type="button"

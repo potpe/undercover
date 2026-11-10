@@ -61,7 +61,8 @@ export function DecisionSection({
         <strong>Policy section</strong>
         {decision.policy_section}
       </p>
-      {bundle.claim.status === "waiting_for_sign_off" &&
+      {bundle.evaluation_run_id === null &&
+      bundle.claim.status === "waiting_for_sign_off" &&
       bundle.paid_amount === null ? (
         <div className="sign-off">
           <div>

@@ -162,6 +162,38 @@ export interface DispatchRun {
   wall_seconds: number;
 }
 
+export interface EvaluationMeasures {
+  decision_accuracy: number;
+  accuracy: number;
+  cost_of_mistakes: number;
+  straight_through: number;
+  model_cost: number;
+  model_cost_per_claim: number;
+  seconds_per_claim: number;
+  slowest_claim: number;
+  seconds: number;
+}
+
+export interface EvaluationClaim extends RunClaim {
+  source_claim_id: string;
+  handler_decision: DecisionKind;
+  handler_payout: number;
+  agent_decision: DecisionKind;
+  agent_payout: number;
+  agent_reason: string;
+  decision_match: boolean;
+  right: boolean;
+  mistake_cost: number;
+}
+
+export interface EvaluationRun extends DispatchRun {
+  kind: "evaluation";
+  evaluation_set: "evaluation" | "held_out";
+  tiny: boolean;
+  measures: EvaluationMeasures;
+  claim_comparisons: EvaluationClaim[];
+}
+
 export interface ClaimBundle {
   claim: Claim;
   policy: Policy;
@@ -228,6 +260,26 @@ export function getCurrentDispatch(): Promise<DispatchRun | null> {
 
 export function startDispatch(concurrency: number): Promise<DispatchRun> {
   return postJson("/api/dispatches", { concurrency });
+}
+
+export function listEvaluations(): Promise<EvaluationRun[]> {
+  return request<EvaluationRun[]>("/api/evaluations");
+}
+
+export function getEvaluation(runId: number): Promise<EvaluationRun> {
+  return request<EvaluationRun>(`/api/evaluations/${String(runId)}`);
+}
+
+export function startEvaluation(
+  concurrency: number,
+  evaluationSet: "evaluation" | "held_out",
+  tiny: boolean,
+): Promise<DispatchRun> {
+  return postJson("/api/evaluations", {
+    concurrency,
+    evaluation_set: evaluationSet,
+    tiny,
+  });
 }
 
 export function listHandlers(): Promise<Handler[]> {

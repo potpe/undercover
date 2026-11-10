@@ -1,12 +1,12 @@
 # Status
 
-The swarm build is in progress. Phases 1 through 4 are complete.
+The swarm and scoreboard build is implemented through Phase 5. Hosted verification is pending.
 
-- `backend/`: FastAPI and SQLAlchemy Core, using SQLite offline or Supabase Postgres through `DATABASE_URL`. Postgres uses schema `undercover` and at most four pooled connections per process. APIs cover claims, document reads, deterministic payouts, concurrent dispatches, isolated evaluations, deterministic scoreboard measures, recovery, decisions, sign-off, payment, usage/time ledgers and record-built summaries. Handler decisions live in backend-only tables and never appear in claim/agent reads. The backend enforces the $1,000 sign-off rule and treats identical decision/payment replays as done.
-- `agent/`: a hand-written synchronous claim graph plus a model-free LangGraph dispatcher using `Send`, N-way concurrency and targeted retries. Each claim keeps its own thread. A process-wide synchronous pool caps Postgres checkpoint connections at four, with a separate `PostgresSaver` per claim; tests use isolated SQLite. Langfuse sessions remain claim/thread-scoped with dispatch/evaluation tags.
-- `agent/service.py`: a separate FastAPI service on port 8002 for claim work, dispatches and sign-off resume. The backend calls `UNDERCOVER_AGENT` through `backend/agent_service.py`; sign-off is saved before notification and stands if the agent is unavailable. One non-blocking slot prevents concurrent dispatches/evaluations. Startup marks stale runs stopped and recovers signed-off work; the next dispatch resumes saved claim threads and attempts.
-- `dashboard/`: branded, responsive claims queue and current-dispatch panel with N=1–25 (default 3), claim states/attempts, model/reasoning, cost/time and record-built summaries. Full claim workspace retains activity, sections read and decision details. Handlers only sign off; the agent then resumes and pays. The instructions page shows only the claim agent.
-- `e2e/`: eight Playwright tests covering queue, claim-only instructions, claims, decisions, sign-off notification, dispatch claims/summary, N validation and the N-valued service request. They use isolated SQLite and a stand-in agent on port 8003, never hosted services or a model.
+- `backend/`: FastAPI and SQLAlchemy Core on SQLite offline or Supabase Postgres. APIs cover claims, document reads, deterministic payouts, dispatches, evaluations, usage/time ledgers, decisions, sign-off, payment and record-built summaries/scores. The backend enforces the $1,000 sign-off rule and idempotent writes. Handler sources and decisions are backend-only.
+- `agent/`: a synchronous durable claim graph plus a model-free LangGraph dispatcher using `Send`, N-way concurrency and targeted retries. Claim threads and attempts survive stopped runs. A process-wide synchronous pool caps checkpoint connections at four with a separate saver per claim. Langfuse keeps claim/thread sessions and adds run tags.
+- `agent/service.py`: a separate FastAPI service on port 8002 starts dispatches/evaluations, works named claims and resumes sign-offs. One non-blocking slot prevents concurrent runs. Startup marks stale runs stopped and recovers saved sign-offs. `uv run -m agent CLM-1001` works one claim without a run; bare CLI queue execution is removed.
+- `dashboard/`: the queue starts N=1–25 dispatches (default 3), with claim states/attempts, record-built summaries and model/active/wall time. Scoreboard starts whole/tiny evaluations, lists newest first with every measure, and links handler/agent comparisons to isolated copy pages with no run/sign-off controls. Instructions show only the claim agent.
+- `e2e/`: ten Playwright tests cover queue, instructions, claim work/decisions, sign-off notification, dispatch summaries, N payloads, evaluation payloads and an API-played scoreboard evaluation. Tests use isolated SQLite and the port-8003 stand-in, never hosted services or models.
 
 ## Set up
 
@@ -15,25 +15,19 @@ uv sync
 npm install
 ```
 
-Set these values in `.env` for hosted/live work:
+For hosted/live work, set `DATABASE_URL`, `OPENROUTER_API_KEY`, `LANGFUSE_SECRET_KEY`, `LANGFUSE_PUBLIC_KEY` and `LANGFUSE_BASE_URL` in `.env`. `UNDERCOVER_AGENT` is optional and defaults to `http://127.0.0.1:8002`.
 
-- `DATABASE_URL`: the Supabase session pooler connection string.
-- `OPENROUTER_API_KEY`: the OpenRouter key.
-- `LANGFUSE_SECRET_KEY`, `LANGFUSE_PUBLIC_KEY` and `LANGFUSE_BASE_URL`: the Langfuse project connection.
-
-`MODEL_NAME` is optional, for example `MODEL_NAME=openrouter/free`; the default is `openai/gpt-6-luna` with low reasoning. `UNDERCOVER_AGENT` is optional and defaults to `http://127.0.0.1:8002`.
-
-Tests do not read `.env` and need none of these services.
+The default model is `openai/gpt-6-luna` with low reasoning. `MODEL_NAME` overrides it with no reasoning effort, recorded as `none`. Tests do not read `.env` and need no hosted service.
 
 ## Reseed
 
-Stop the development services, then run:
+Stop development services, then run:
 
 ```sh
 npm run seed
 ```
 
-This intentionally resets the database selected by `DATABASE_URL` (or local SQLite), including decisions, payments, runs, activity and old checkpoints, then restores exactly 25 waiting claims. Normal startup preserves existing work.
+This intentionally resets the selected database, including decisions, payments, runs, evaluations, ledgers, activity and checkpoints. It restores exactly 25 waiting operational claims and the separate evaluation sources/labels, with an empty scoreboard. Normal startup preserves work, and evaluations need no reseed.
 
 ## Run
 
@@ -43,9 +37,13 @@ npm run dev
 
 Open `http://localhost:5173`. The backend listens at `http://localhost:8000` and the agent service at `http://localhost:8002`.
 
-For a low-cost trial, leave Claim cap at five and select Run queue. A waiting claim can also be run on its own from its claim page. With the services running, `uv run -m agent` starts a cap-five run; `uv run -m agent --claim-id CLM-1001` starts a named claim. `--claim-cap` changes the queue cap.
+On Claims, choose Agents at once from 1 to 25 (default 3) and Start dispatch. A dispatch works every waiting or interrupted operational claim, oldest submitted first; N limits concurrency, not claim count. The panel shows each claim, decision counts, held payouts, handler handoffs, unfinished claims and model/active/wall time.
 
-An over-limit approval waits for sign-off. Signing off saves the handler and time, shows the claim In progress, and asks the agent to resume payment. If the agent is down or stopped, the next service start or run recovers the saved work without adding an attempt. Real errors retain the existing fresh-retry and second-failure handoff behavior.
+On Scoreboard, choose Evaluation set or Held-out set, the whole set or its five tiny claims, and N. Start evaluations one at a time relative to dispatches. Open an evaluation for handler/agent decisions, payouts, reasons, misses and per-claim cost/time. A stopped run remains labelled stopped; undecided copies count as referrals.
+
+Over-limit operational approvals wait for sign-off. Signing off saves the handler/time, shows In progress, then resumes the same thread and pays once. Evaluation approvals held for sign-off count as finished, stay unpaid and cannot be signed off.
+
+With the services running, `uv run -m agent CLM-1001` works only that named claim with no dispatch/evaluation.
 
 ## Check
 
@@ -53,12 +51,8 @@ An over-limit approval waits for sign-off. Signing off saves the handler and tim
 npm run check
 ```
 
-This runs Ruff, Pyright, pytest with at least 80% coverage, Prettier, ESLint, tsc, Vitest with at least 80% coverage, and Playwright. Stop development services first so Playwright can start its isolated database and stand-in agent.
+This runs Ruff, Pyright, pytest with at least 80% coverage, Prettier, ESLint, tsc, Vitest with at least 80% coverage, and Playwright. Stop development services first so Playwright can start isolated services.
 
 ## Verification
 
-Swarm Phase 4: `npm run check:python` passed 99 tests with 93.25% coverage. Evaluation copies use fresh ids and the same dispatcher/claim graph, stay out of the queue, reject sign-off, finish held approvals unpaid, clear completed checkpoints and retain exact per-run cost/time. Backend tests cover source/label isolation, tiny selection, stopped evaluations, newest-first APIs and independently calculated quality/mistake/cost/time measures. Phase 3's TypeScript/browser gate passed 20 Vitest and eight Playwright tests.
-
-The previous durable-state verification used DeepSeek and completed five selected claims; 20 remained waiting. A stopped undecided claim resumed on its original thread with zero attempts and one decision/payment, and the stopped queue finished its original plan. `CLM-1003` waited for Dana's sign-off, showed In progress, then paid $3,750.00 after 3.71 seconds with one decision and one payment. The current Langfuse session contains traces before and after sign-off with no errors in the final run. Supabase showed eight `postgres` connections during live work, below the 12-connection limit. Desktop/mobile browser checks had no overflow or console errors. `MODEL_NAME=openrouter/free` was restored afterward.
-
-Supabase reports RLS disabled on the `undercover` product tables. No remediation was applied in this build; review access policies before exposing the database to client applications.
+Final offline gate: with `.env` absent, `npm run check` passed 99 Python tests at 93.25% coverage, 28 Vitest tests at 90.14% statement coverage and ten Playwright tests without hosted/model calls. Playwright MCP review found no console errors or horizontal overflow at desktop/mobile sizes across dispatch, Scoreboard, evaluation copy and instructions. The one-seed Luna/Supabase/Langfuse verification remains to be recorded.

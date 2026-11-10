@@ -198,15 +198,15 @@ Deliver the evaluation controls and scoreboard, then update the product document
 
 ### Success criteria
 
-- [ ] Scoreboard navigation starts evaluations with a chosen set, whole/tiny scope and N=1–25, shows offline/409 errors, and prevents a second active dispatch/evaluation start.
-- [ ] The newest-first evaluation list shows set/scope, N, model/reasoning, status and every required measure with clear units and USD/percentage/time formatting. Stopped evaluations remain identifiable.
-- [ ] Evaluation detail shows handler and agent decision/payout side by side, agent reason, per-claim cost/time and easy-to-spot decision/payout misses; every copy id opens the correct claim page and no sign-off control appears there.
-- [ ] Playwright verifies that starting an evaluation sends N, set and scope to the port-8003 stand-in through the backend, and that an evaluation played deterministically through service-side backend APIs appears on the scoreboard with hand-calculated measures and linked claims, following the intent of the brief's `e2e/run.spec.ts` example.
-- [ ] Vitest covers evaluation controls, list/detail states, every measure, miss rendering, stopped state and copy navigation. Strict TypeScript and both coverage thresholds remain intact.
-- [ ] Playwright MCP review at desktop and mobile sizes covers dispatch controls/panel, Scoreboard list/detail, an evaluation copy and the claim-only instructions page, with keyboard-accessible controls, sufficient contrast, no console errors and no horizontal overflow.
-- [ ] `docs/SPEC.md` updates queue work and team visibility for dispatches/evaluations/scoreboard while leaving Rules unchanged. `docs/TECH_STACK.md` documents Luna, ledgers, the model-free dispatcher, isolated answer keys, shared four-connection checkpoint pool and service boundary.
-- [ ] `docs/PROCESS.md` replaces the five-claim cap with N-based dispatch/evaluation operation, named-only CLI, reseeding, offline checks and Windows behavior. `docs/CODE_STANDARDS.md` updates the agent/data rules, including rules 10 and 13, for the five-part agent and removal of queue middleware/to-dos. `docs/STATUS.md` has current setup, run, evaluation, recovery and verification instructions.
-- [ ] With `.env` temporarily moved away and safely restored, `npm run check` passes Ruff, Pyright, pytest, Prettier, ESLint, tsc, Vitest and Playwright with at least 80% Python/TypeScript coverage and no hosted/model calls.
+- [x] Scoreboard navigation starts evaluations with a chosen set, whole/tiny scope and N=1–25, shows offline/409 errors, and prevents a second active dispatch/evaluation start.
+- [x] The newest-first evaluation list shows set/scope, N, model/reasoning, status and every required measure with clear units and USD/percentage/time formatting. Stopped evaluations remain identifiable.
+- [x] Evaluation detail shows handler and agent decision/payout side by side, agent reason, per-claim cost/time and easy-to-spot decision/payout misses; every copy id opens the correct claim page and no sign-off control appears there.
+- [x] Playwright verifies that starting an evaluation sends N, set and scope to the port-8003 stand-in through the backend, and that an evaluation played deterministically through service-side backend APIs appears on the scoreboard with hand-calculated measures and linked claims, following the intent of the brief's `e2e/run.spec.ts` example.
+- [x] Vitest covers evaluation controls, list/detail states, every measure, miss rendering, stopped state and copy navigation. Strict TypeScript and both coverage thresholds remain intact.
+- [x] Playwright MCP review at desktop and mobile sizes covers dispatch controls/panel, Scoreboard list/detail, an evaluation copy and the claim-only instructions page, with keyboard-accessible controls, sufficient contrast, no console errors and no horizontal overflow.
+- [x] `docs/SPEC.md` updates queue work and team visibility for dispatches/evaluations/scoreboard while leaving Rules unchanged. `docs/TECH_STACK.md` documents Luna, ledgers, the model-free dispatcher, isolated answer keys, shared four-connection checkpoint pool and service boundary.
+- [x] `docs/PROCESS.md` replaces the five-claim cap with N-based dispatch/evaluation operation, named-only CLI, reseeding, offline checks and Windows behavior. `docs/CODE_STANDARDS.md` updates the agent/data rules, including rules 10 and 13, for the five-part agent and removal of queue middleware/to-dos. `docs/STATUS.md` has current setup, run, evaluation, recovery and verification instructions.
+- [x] With `.env` temporarily moved away and safely restored, `npm run check` passes Ruff, Pyright, pytest, Prettier, ESLint, tsc, Vitest and Playwright with at least 80% Python/TypeScript coverage and no hosted/model calls.
 
 ## Phase 6: One-seed live swarm and scoreboard verification
 

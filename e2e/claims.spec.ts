@@ -311,3 +311,128 @@ test("the dispatch concurrency is validated without starting a model run", async
     "Agents at once must be a whole number from 1 to 25.",
   );
 });
+
+test("starting an evaluation sends N, set and scope to the agent service", async ({
+  page,
+  request,
+}) => {
+  await page.goto("/");
+  await page.getByRole("button", { name: "Scoreboard" }).click();
+  await page.getByLabel("Evaluation set").selectOption("held_out");
+  await page.getByLabel("Only the five tiny claims").check();
+  await page.getByLabel("Agents at once").fill("5");
+  const started = page.waitForResponse(
+    (response) =>
+      response.url().endsWith("/api/evaluations") &&
+      response.request().method() === "POST",
+  );
+  await page.getByRole("button", { name: "Start evaluation" }).click();
+  await started;
+
+  const calls = await request.get("http://127.0.0.1:8003/requests");
+  const requests = (await calls.json()) as {
+    url: string;
+    body: {
+      concurrency?: number;
+      evaluation_set?: string;
+      tiny?: boolean;
+    } | null;
+  }[];
+  const evaluation = requests.find((entry) => entry.url === "/evaluations");
+  expect(evaluation?.body).toEqual({
+    concurrency: 5,
+    evaluation_set: "held_out",
+    tiny: true,
+  });
+});
+
+test("the scoreboard shows an API-played evaluation and linked copy", async ({
+  page,
+  request,
+}) => {
+  const created = await request.post(
+    "http://127.0.0.1:8000/api/internal/evaluations",
+    {
+      data: {
+        concurrency: 5,
+        model_name: "openai/gpt-6-luna",
+        reasoning_effort: "low",
+        evaluation_set: "evaluation",
+        tiny: true,
+      },
+    },
+  );
+  expect(created.status()).toBe(201);
+  const run = (await created.json()) as { run_id: number };
+  const initial = await request.get(
+    `http://127.0.0.1:8000/api/evaluations/${String(run.run_id)}`,
+  );
+  const evaluation = (await initial.json()) as {
+    claim_comparisons: { claim_id: string }[];
+  };
+  const copyId = evaluation.claim_comparisons[0].claim_id;
+  const decision = await request.post(
+    `http://127.0.0.1:8000/api/claims/${copyId}/decision`,
+    {
+      data: {
+        decision: "approve",
+        payout: 3750,
+        reason: "The test plays a held approval for the evaluation copy.",
+        policy_section: "Section 7: Emergency Medical; Section 10: Payment",
+      },
+    },
+  );
+  expect(decision.ok()).toBe(true);
+  await request.post(
+    `http://127.0.0.1:8000/api/internal/runs/${String(run.run_id)}/claims/${copyId}/complete`,
+    { data: { result: "Held evaluation approval" } },
+  );
+  await request.post(`http://127.0.0.1:8000/api/claims/${copyId}/model-calls`, {
+    data: {
+      run_id: run.run_id,
+      model_name: "openai/gpt-6-luna",
+      reasoning_effort: "low",
+      prompt_tokens: 10,
+      completion_tokens: 5,
+      total_tokens: 15,
+      cost: 0.1,
+    },
+  });
+  await request.post(
+    `http://127.0.0.1:8000/api/claims/${copyId}/work-periods`,
+    {
+      data: {
+        run_id: run.run_id,
+        thread_id: `thread-${copyId}`,
+        started_at: "2026-11-10T12:00:00Z",
+        finished_at: "2026-11-10T12:00:02Z",
+        seconds: 2,
+      },
+    },
+  );
+  await request.post(
+    `http://127.0.0.1:8000/api/internal/runs/${String(run.run_id)}/finish`,
+  );
+
+  await page.goto("/");
+  await page.getByRole("button", { name: "Scoreboard" }).click();
+
+  await expect(page.getByText("Decision accuracy: 20%")).toBeVisible();
+  await expect(page.getByText("Accuracy: 20%", { exact: true })).toBeVisible();
+  await expect(page.getByText("Cost of mistakes: $3,900.00")).toBeVisible();
+  await expect(page.getByText("Straight through: 20%")).toBeVisible();
+  await expect(page.getByText("Model cost: $0.10")).toBeVisible();
+  await expect(page.getByText("Model cost per claim: $0.02")).toBeVisible();
+  await expect(page.getByText("Time per claim: 0.4 s")).toBeVisible();
+  await expect(page.getByText("Slowest claim: 2.0 s")).toBeVisible();
+
+  await page
+    .getByRole("button", { name: `View evaluation ${String(run.run_id)}` })
+    .click();
+  await expect(page.getByText("Decision miss").first()).toBeVisible();
+  await page.getByRole("button", { name: `View claim ${copyId}` }).click();
+
+  await expect(page.locator(".evaluation-copy")).toBeVisible();
+  await expect(page.getByLabel("Signing handler")).toHaveCount(0);
+  await expect(page.getByRole("button", { name: "Run agent" })).toHaveCount(0);
+});

@@ -28,7 +28,12 @@ export function ClaimOverview({
         </div>
         <StatusBadge status={status} />
       </div>
-      {status === "waiting" ? (
+      {bundle.evaluation_run_id !== null ? (
+        <p className="evaluation-copy">
+          Evaluation copy · Evaluation {bundle.evaluation_run_id}
+        </p>
+      ) : null}
+      {status === "waiting" && bundle.evaluation_run_id === null ? (
         <button
           type="button"
           className="primary-action"

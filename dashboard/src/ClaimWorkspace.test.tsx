@@ -413,3 +413,18 @@ it("shows a claim loading failure", async () => {
     "We could not load this claim.",
   );
 });
+
+it("identifies an evaluation copy and hides run and sign-off controls", async () => {
+  const held = {
+    ...makeBundle("waiting_for_sign_off", "approve", 3750),
+    evaluation_run_id: 7,
+  };
+  mockDetail(held);
+  render(<ClaimWorkspace claimId="CLM-1001" onBack={vi.fn()} />);
+
+  expect(
+    await screen.findByText("Evaluation 7", { exact: false }),
+  ).toBeDefined();
+  expect(screen.queryByLabelText("Signing handler")).toBeNull();
+  expect(screen.queryByRole("button", { name: "Run agent" })).toBeNull();
+});

@@ -65,7 +65,11 @@ export function ClaimWorkspace({
   }, [claimId, bundle?.claim.status]);
 
   useEffect(() => {
-    if (bundle?.claim.status !== "waiting_for_sign_off" || handlers.length)
+    if (
+      bundle?.claim.status !== "waiting_for_sign_off" ||
+      bundle.evaluation_run_id !== null ||
+      handlers.length
+    )
       return;
     listHandlers()
       .then((data) => {
@@ -74,7 +78,7 @@ export function ClaimWorkspace({
       .catch((error: unknown) => {
         setActionError(errorMessage(error));
       });
-  }, [bundle?.claim.status, handlers.length]);
+  }, [bundle, handlers.length]);
 
   async function handleRun() {
     setBusy(true);

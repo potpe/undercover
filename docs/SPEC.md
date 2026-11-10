@@ -8,7 +8,7 @@ UnderCover sells travel insurance on three plans: Economy, Premium and First. Ou
 
 ## The agent harness
 
-The UnderCover Agent works the queue the way a handler does. One queue run can cover every waiting claim or stop at a chosen claim cap; a named waiting claim can also be run on its own. The queue agent chooses the order and keeps a durable to-do list. Each claim attempt uses its own claim graph and thread, with no earlier claims in its context.
+The UnderCover Agent works the queue the way a handler does. A dispatch covers every waiting claim and every claim left in progress, oldest submitted first, with up to N claim agents at once. Code chooses and tracks that work without a model. Each claim uses its own claim graph and thread, with no earlier claims in its context. A named waiting claim can also be run on its own without a dispatch.
 
 For each claim the graph should:
 
@@ -20,18 +20,23 @@ For each claim the graph should:
 
 The graph records the decision and owns the payment step. An approval that needs no sign-off is paid immediately. An approval over the limit pauses with its work saved until a handler signs off; the agent then resumes the same thread and pays it. Sign-off is saved even if the agent is temporarily unavailable.
 
-If the agent is stopped partway through, the next run carries on from the latest saved step with the same thread and no new attempt. A claim that fails with an error instead returns to the queue for one fresh retry. After a second failure, the claim is left for a handler. One failed claim does not stop the run, a stopped queue run is finished by the next run, and no claim is decided or paid twice. Before finishing, the queue agent checks every selected claim and gives handlers a short summary.
+A rate limit or timeout waits and carries on from the latest saved step as the same attempt. If its retries run out, the claim stays in progress for the next dispatch. Any other failure returns the claim to the queue for one fresh retry in the same dispatch; a second failure leaves it for a handler. One bad claim does not stop the dispatch, and no claim is decided or paid twice.
+
+If the agent is stopped partway through, its dispatch or evaluation is marked stopped. The next dispatch carries on with the claims left in progress and the waiting queue, preserving each saved thread and attempt. A dispatch skips a claim already resuming after sign-off. Its summary comes from our records, not a model: decision counts, payouts waiting for sign-off, claims left for a handler and claims still in progress.
+
+Evaluations use fresh copies of either labelled set, whole or its five tiny claims, through the same dispatcher and claim graph. Copies never enter the queue or accept sign-off; a held approval counts as finished and its saved progress is cleared. The Scoreboard compares each copy with its handler decision and reports decision accuracy, payout accuracy, cost of mistakes, straight-through rate, model cost and active/whole-run time. An undecided copy counts as a referral.
 
 Our goal is to handle claims straight through, as accurately as our handlers do.
 
 ## What the team needs to see
 
 - The queue, with where each claim stands: waiting, in progress, waiting for sign-off, decided or left for a handler.
-- The current run's cap, model, ordered to-do list, attempts, results and summary.
+- The current dispatch's N, model, reasoning, claims, attempts, states, record-built summary, model cost, active work time and whole-run time.
 - Each claim in full, with the agent's decision and its reasons.
 - What the agent is doing on a claim while it works, step by step.
 - Which sections of the policy wording and claims manual it read.
-- The queue and claim agents' instructions, read only.
+- Evaluations, newest first, with every quality, mistake, cost and time measure and handler/agent comparisons linked to the copies.
+- The claim agent's instructions, read only.
 
 ## Rules
 

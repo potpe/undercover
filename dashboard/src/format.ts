@@ -24,6 +24,10 @@ export function formatSeconds(seconds: number): string {
   return `${seconds.toFixed(1)} s`;
 }
 
+export function formatPercent(value: number): string {
+  return `${(value * 100).toFixed(0)}%`;
+}
+
 export function formatDateTime(value: string): string {
   return new Intl.DateTimeFormat("en-US", {
     dateStyle: "medium",
