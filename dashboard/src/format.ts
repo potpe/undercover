@@ -5,8 +5,23 @@ const moneyFormatter = new Intl.NumberFormat("en-US", {
   currency: "USD",
 });
 
+const modelCostFormatter = new Intl.NumberFormat("en-US", {
+  style: "currency",
+  currency: "USD",
+  minimumFractionDigits: 2,
+  maximumFractionDigits: 6,
+});
+
 export function formatMoney(amount: number): string {
   return moneyFormatter.format(amount);
+}
+
+export function formatModelCost(amount: number): string {
+  return modelCostFormatter.format(amount);
+}
+
+export function formatSeconds(seconds: number): string {
+  return `${seconds.toFixed(1)} s`;
 }
 
 export function formatDateTime(value: string): string {

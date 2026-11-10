@@ -2,7 +2,9 @@ import { expect, it } from "vitest";
 import {
   formatClaimType,
   formatDateTime,
+  formatModelCost,
   formatMoney,
+  formatSeconds,
   statusLabel,
 } from "./format";
 
@@ -11,6 +13,8 @@ it("formats US dollars and claim labels", () => {
   expect(formatMoney(0)).toBe("$0.00");
   expect(formatClaimType("emergency_medical")).toBe("Emergency medical");
   expect(formatDateTime("2026-11-09T12:00:00Z")).toContain("Nov 9, 2026");
+  expect(formatModelCost(0.005)).toBe("$0.005");
+  expect(formatSeconds(12.345)).toBe("12.3 s");
 });
 
 it("labels every claim state", () => {

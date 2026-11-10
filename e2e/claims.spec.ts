@@ -20,13 +20,13 @@ test("the agent instructions are read only", async ({ page }) => {
     page.getByRole("heading", { name: "Agent instructions" }),
   ).toBeVisible();
   await expect(
-    page.getByRole("heading", { name: "Queue agent" }),
-  ).toBeVisible();
-  await expect(
     page.getByRole("heading", { name: "Claim agent" }),
   ).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Queue agent" })).toHaveCount(
+    0,
+  );
   await expect(
-    page.getByText("You are the UnderCover queue agent.", { exact: false }),
+    page.getByText("You are the UnderCover claim agent.", { exact: false }),
   ).toBeVisible();
   await expect(page.getByRole("textbox")).toHaveCount(0);
 });
@@ -172,21 +172,38 @@ test("handler sign-off reaches the agent service without direct payment", async 
   ).toHaveLength(1);
 });
 
-test("the dashboard shows run to-dos and the sections read", async ({
+test("the dashboard shows dispatch claims, record summary and sections read", async ({
   page,
   request,
 }) => {
   const run = {
     run_id: 7,
-    thread_id: "browser",
-    claim_cap: 5,
-    target_claim_id: null,
+    kind: "dispatch",
+    concurrency: 3,
     model_name: "openai/gpt-6-luna",
+    reasoning_effort: "low",
     status: "completed",
-    summary: "5 claims handled: 4 done, 1 left for handler.",
+    evaluation_set: null,
+    tiny: null,
+    summary: {
+      approved: 2,
+      declined: 1,
+      referred: 1,
+      waiting_for_sign_off: [{ claim_id: "CLM-1003", payout: 3750 }],
+      left_for_handler: ["CLM-1002"],
+      in_progress: ["CLM-1004"],
+      error: null,
+    },
     created_at: "2026-11-05T12:00:00Z",
     completed_at: "2026-11-05T12:05:00Z",
-    todos: [
+    stopped_at: null,
+    model_cost: 0.125,
+    prompt_tokens: 1000,
+    completion_tokens: 100,
+    total_tokens: 1100,
+    active_seconds: 12.5,
+    wall_seconds: 30,
+    claims: [
       {
         claim_id: "CLM-1001",
         position: 1,
@@ -194,6 +211,10 @@ test("the dashboard shows run to-dos and the sections read", async ({
         attempts: 0,
         result: "Approve $420.00",
         error: null,
+        started_at: "2026-11-05T12:00:00Z",
+        finished_at: "2026-11-05T12:00:10Z",
+        model_cost: 0.05,
+        active_seconds: 10,
       },
       {
         claim_id: "CLM-1002",
@@ -202,34 +223,26 @@ test("the dashboard shows run to-dos and the sections read", async ({
         attempts: 2,
         result: "Provider failed",
         error: "Provider failed",
-      },
-      {
-        claim_id: "CLM-1003",
-        position: 3,
-        status: "to_do",
-        attempts: 0,
-        result: null,
-        error: null,
+        started_at: "2026-11-05T12:00:00Z",
+        finished_at: "2026-11-05T12:00:20Z",
+        model_cost: 0.05,
+        active_seconds: 20,
       },
       {
         claim_id: "CLM-1004",
-        position: 4,
+        position: 3,
         status: "in_progress",
-        attempts: 1,
-        result: null,
-        error: null,
-      },
-      {
-        claim_id: "CLM-1005",
-        position: 5,
-        status: "done",
         attempts: 0,
-        result: "Approve $243.00",
-        error: null,
+        result: null,
+        error: "Rate limited",
+        started_at: "2026-11-05T12:00:00Z",
+        finished_at: null,
+        model_cost: 0.025,
+        active_seconds: 5,
       },
     ],
   };
-  await page.route("**/api/runs/current", (route) =>
+  await page.route("**/api/dispatches/current", (route) =>
     route.fulfill({ json: run }),
   );
   await request.post(
@@ -243,12 +256,15 @@ test("the dashboard shows run to-dos and the sections read", async ({
 
   await page.goto("/");
   await expect(
-    page.getByText("5 claims handled: 4 done, 1 left for handler."),
+    page.getByText("2 approved, 1 declined, 1 referred."),
   ).toBeVisible();
   await expect(page.getByText("openai/gpt-6-luna")).toBeVisible();
-  await expect(page.locator(".todo-list li")).toHaveCount(5);
+  await expect(page.getByText("Model cost: $0.125")).toBeVisible();
+  await expect(page.locator(".dispatch-list li")).toHaveCount(3);
   await expect(
-    page.locator(".todo-status").getByText("Left for handler", { exact: true }),
+    page
+      .locator(".dispatch-status")
+      .getByText("Left for handler", { exact: true }),
   ).toBeVisible();
 
   await page
@@ -266,14 +282,32 @@ test("the dashboard shows run to-dos and the sections read", async ({
   ).toBeVisible();
 });
 
-test("the queue cap is validated without starting a model run", async ({
+test("starting a dispatch sends N to the agent service", async ({
+  page,
+  request,
+}) => {
+  await page.goto("/");
+  await page.getByLabel("Agents at once").fill("5");
+  await page.getByRole("button", { name: "Start dispatch" }).click();
+
+  const calls = await request.get("http://127.0.0.1:8003/requests");
+  const requests = (await calls.json()) as {
+    method: string;
+    url: string;
+    body: { concurrency?: number } | null;
+  }[];
+  const dispatch = requests.find((entry) => entry.url === "/dispatches");
+  expect(dispatch?.body).toEqual({ concurrency: 5 });
+});
+
+test("the dispatch concurrency is validated without starting a model run", async ({
   page,
 }) => {
   await page.goto("/");
-  await page.getByLabel("Claim cap").fill("0");
-  await page.getByRole("button", { name: "Run queue" }).click();
+  await page.getByLabel("Agents at once").fill("0");
+  await page.getByRole("button", { name: "Start dispatch" }).click();
 
   await expect(page.getByRole("alert")).toHaveText(
-    "Claim cap must be a whole number from 1 to 25.",
+    "Agents at once must be a whole number from 1 to 25.",
   );
 });

@@ -1,12 +1,12 @@
 # Status
 
-The swarm build is in progress. Phases 1 and 2 are complete.
+The swarm build is in progress. Phases 1 through 3 are complete.
 
 - `backend/`: FastAPI and SQLAlchemy Core, using SQLite offline or Supabase Postgres through `DATABASE_URL`. Postgres uses schema `undercover` and at most four pooled connections per process. APIs cover claims, document reads, deterministic payouts, concurrent dispatches, recovery, decisions, sign-off, payment, usage/time ledgers and record-built summaries. The backend enforces the $1,000 sign-off rule and treats identical decision/payment replays as done.
 - `agent/`: a hand-written synchronous claim graph plus a model-free LangGraph dispatcher using `Send`, N-way concurrency and targeted retries. Each claim keeps its own thread. A process-wide synchronous pool caps Postgres checkpoint connections at four, with a separate `PostgresSaver` per claim; tests use isolated SQLite. Langfuse sessions remain claim/thread-scoped with dispatch/evaluation tags.
 - `agent/service.py`: a separate FastAPI service on port 8002 for claim work, dispatches and sign-off resume. The backend calls `UNDERCOVER_AGENT` through `backend/agent_service.py`; sign-off is saved before notification and stands if the agent is unavailable. One non-blocking slot prevents concurrent dispatches/evaluations. Startup marks stale runs stopped and recovers signed-off work; the next dispatch resumes saved claim threads and attempts.
-- `dashboard/`: branded, responsive claims queue and current-run panel; full claim workspace with activity, sections read, decision and payment details. Handlers only sign off; the agent then resumes and pays. The dashboard shows signing handler/time and paid time.
-- `e2e/`: seven Playwright tests covering queue, instructions, claims, decisions, sign-off notification, to-dos, document reads and cap validation. They use isolated SQLite and a stand-in agent on port 8003, never hosted services or a model.
+- `dashboard/`: branded, responsive claims queue and current-dispatch panel with N=1–25 (default 3), claim states/attempts, model/reasoning, cost/time and record-built summaries. Full claim workspace retains activity, sections read and decision details. Handlers only sign off; the agent then resumes and pays. The instructions page shows only the claim agent.
+- `e2e/`: eight Playwright tests covering queue, claim-only instructions, claims, decisions, sign-off notification, dispatch claims/summary, N validation and the N-valued service request. They use isolated SQLite and a stand-in agent on port 8003, never hosted services or a model.
 
 ## Set up
 
@@ -57,7 +57,7 @@ This runs Ruff, Pyright, pytest with at least 80% coverage, Prettier, ESLint, ts
 
 ## Verification
 
-Swarm Phase 2: `npm run check:python` passed 90 tests with 92.97% coverage. Tests cover N-bound concurrency, oldest-first selection, transient same-thread retries, one fresh retry after ordinary errors, second-failure handoff, stopped-run recovery, sign-off resume, exact run summaries/totals, the single-run slot and the four-connection checkpoint pool. The queue agent, queue instructions, to-do table/APIs and bare CLI run are removed. The previous full Python, TypeScript and Playwright gate remains the baseline for later phases.
+Swarm Phase 3: 20 Vitest tests passed with 92.42% statement coverage and eight Playwright tests passed. The queue now starts N-way dispatches, displays record-built claim/decision summaries and exact cost/time, surfaces service-offline/conflict errors, and shows only claim-agent instructions. Browser tests prove N reaches the port-8003 agent stand-in. Phase 2's Python gate passed 90 tests with 92.97% coverage.
 
 The previous durable-state verification used DeepSeek and completed five selected claims; 20 remained waiting. A stopped undecided claim resumed on its original thread with zero attempts and one decision/payment, and the stopped queue finished its original plan. `CLM-1003` waited for Dana's sign-off, showed In progress, then paid $3,750.00 after 3.71 seconds with one decision and one payment. The current Langfuse session contains traces before and after sign-off with no errors in the final run. Supabase showed eight `postgres` connections during live work, below the 12-connection limit. Desktop/mobile browser checks had no overflow or console errors. `MODEL_NAME=openrouter/free` was restored afterward.
 

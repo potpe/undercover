@@ -1,10 +1,10 @@
 import { useEffect, useState } from "react";
 import {
-  createQueueRun,
-  getCurrentRun,
+  getCurrentDispatch,
   getInstructions,
   listClaims,
-  type AgentRun,
+  startDispatch,
+  type DispatchRun,
   type ClaimSummary,
 } from "./api";
 import { ClaimWorkspace } from "./ClaimWorkspace";
@@ -18,15 +18,15 @@ function QueueView({
   onSelect,
 }: Readonly<{ onSelect: (claimId: string) => void }>) {
   const [claims, setClaims] = useState<ClaimSummary[]>([]);
-  const [run, setRun] = useState<AgentRun | null>(null);
-  const [cap, setCap] = useState("5");
+  const [run, setRun] = useState<DispatchRun | null>(null);
+  const [concurrency, setConcurrency] = useState("3");
   const [state, setState] = useState<"loading" | "ready" | "error">("loading");
   const [busy, setBusy] = useState(false);
   const [actionError, setActionError] = useState("");
 
   useEffect(() => {
     let active = true;
-    Promise.all([listClaims(), getCurrentRun()])
+    Promise.all([listClaims(), getCurrentDispatch()])
       .then(([claimData, runData]) => {
         if (active) {
           setClaims(claimData);
@@ -46,7 +46,7 @@ function QueueView({
     if (run?.status !== "in_progress") return;
     let active = true;
     const timer = window.setInterval(() => {
-      Promise.all([listClaims(), getCurrentRun()])
+      Promise.all([listClaims(), getCurrentDispatch()])
         .then(([claimData, runData]) => {
           if (active) {
             setClaims(claimData);
@@ -68,20 +68,18 @@ function QueueView({
   }, [run?.status]);
 
   async function handleRun() {
-    const claimCap = Number(cap);
-    if (!Number.isInteger(claimCap) || claimCap < 1 || claimCap > 25) {
-      setActionError("Claim cap must be a whole number from 1 to 25.");
+    const agents = Number(concurrency);
+    if (!Number.isInteger(agents) || agents < 1 || agents > 25) {
+      setActionError("Agents at once must be a whole number from 1 to 25.");
       return;
     }
     setBusy(true);
     setActionError("");
     try {
-      setRun(
-        await createQueueRun(claimCap, `dashboard-${crypto.randomUUID()}`),
-      );
+      setRun(await startDispatch(agents));
     } catch (error) {
       setActionError(
-        error instanceof Error ? error.message : "Could not start run.",
+        error instanceof Error ? error.message : "Could not start dispatch.",
       );
     } finally {
       setBusy(false);
@@ -101,10 +99,10 @@ function QueueView({
     <div className="queue-layout">
       <RunPanel
         run={run}
-        cap={cap}
+        concurrency={concurrency}
         busy={busy}
         error={actionError}
-        onCapChange={setCap}
+        onConcurrencyChange={setConcurrency}
         onRun={handleRun}
         onSelect={onSelect}
       />
@@ -169,7 +167,7 @@ function QueueView({
 }
 
 function InstructionsView() {
-  const [instructions, setInstructions] = useState({ queue: "", claim: "" });
+  const [instructions, setInstructions] = useState({ claim: "" });
   const [state, setState] = useState<"loading" | "ready" | "error">("loading");
 
   useEffect(() => {
@@ -203,10 +201,6 @@ function InstructionsView() {
       <p className="eyebrow">UnderCover Agent</p>
       <h1 id="instructions-title">Agent instructions</h1>
       <p>The current instructions are read only.</p>
-      <article>
-        <h2>Queue agent</h2>
-        <pre>{instructions.queue}</pre>
-      </article>
       <article>
         <h2>Claim agent</h2>
         <pre>{instructions.claim}</pre>

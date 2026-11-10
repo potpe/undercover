@@ -167,14 +167,14 @@ Replace the queue controls and to-do presentation with the new dispatch API. Mak
 
 ### Success criteria
 
-- [ ] The queue shows “Agents at once,” default 3, accepts only integers 1–25, and starts one dispatch with the entered N. Active/invalid starts are disabled or rejected with clear messages.
-- [ ] When the stand-in is unavailable, the dashboard says the agent service is not running and no dispatch record is created. A mocked 409 for an active dispatch/evaluation is also shown without another run.
-- [ ] The run panel renders each selected claim, live status/attempts, model/reasoning, model cost, active time and wall time; polling continues while the dispatch is in progress and stops afterward.
-- [ ] Completed panel tests render exact record-built decision counts and every held payout, left-for-handler and still-in-progress claim, with claim links and no model-authored summary dependency.
-- [ ] The instructions page contains only the claim agent instructions; old queue text and cap/run-queue labels are absent.
-- [ ] Playwright starts a dispatch at a chosen N and verifies the port-8003 stand-in receives its JSON body through the backend. The old to-do end-to-end test is replaced by dispatch-claim/status/summary coverage using deterministic API records, never a model.
-- [ ] Vitest covers default/boundary/invalid N, loading/polling, offline/conflict errors, all summary sections and cost/time formatting. Strict TypeScript has no `any` and coverage remains at least 80%.
-- [ ] `npm run check:ts` and `npm run e2e` pass with no hosted service or model calls.
+- [x] The queue shows “Agents at once,” default 3, accepts only integers 1–25, and starts one dispatch with the entered N. Active/invalid starts are disabled or rejected with clear messages.
+- [x] When the stand-in is unavailable, the dashboard says the agent service is not running and no dispatch record is created. A mocked 409 for an active dispatch/evaluation is also shown without another run.
+- [x] The run panel renders each selected claim, live status/attempts, model/reasoning, model cost, active time and wall time; polling continues while the dispatch is in progress and stops afterward.
+- [x] Completed panel tests render exact record-built decision counts and every held payout, left-for-handler and still-in-progress claim, with claim links and no model-authored summary dependency.
+- [x] The instructions page contains only the claim agent instructions; old queue text and cap/run-queue labels are absent.
+- [x] Playwright starts a dispatch at a chosen N and verifies the port-8003 stand-in receives its JSON body through the backend. The old to-do end-to-end test is replaced by dispatch-claim/status/summary coverage using deterministic API records, never a model.
+- [x] Vitest covers default/boundary/invalid N, loading/polling, offline/conflict errors, all summary sections and cost/time formatting. Strict TypeScript has no `any` and coverage remains at least 80%.
+- [x] `npm run check:ts` and `npm run e2e` pass with no hosted service or model calls.
 
 ## Phase 4: Isolated evaluations and deterministic scoring API
 

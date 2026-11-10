@@ -7,7 +7,7 @@ import {
 } from "@testing-library/react";
 import { afterEach, expect, it, vi } from "vitest";
 import { App } from "./App";
-import type { AgentRun, ClaimSummary } from "./api";
+import type { ClaimSummary, DispatchRun } from "./api";
 
 const claims: ClaimSummary[] = [
   {
@@ -52,24 +52,45 @@ const claims: ClaimSummary[] = [
   },
 ];
 
-const completedRun: AgentRun = {
+const completedRun: DispatchRun = {
   run_id: 1,
-  thread_id: "thread",
-  claim_cap: 4,
-  target_claim_id: null,
+  kind: "dispatch",
+  concurrency: 3,
   model_name: "openai/gpt-6-luna",
+  reasoning_effort: "low",
   status: "completed",
-  summary: "4 claims handled: 3 done, 1 left for handler.",
+  evaluation_set: null,
+  tiny: null,
+  summary: {
+    approved: 2,
+    declined: 1,
+    referred: 1,
+    waiting_for_sign_off: [{ claim_id: "CLM-1003", payout: 3750 }],
+    left_for_handler: ["CLM-1004"],
+    in_progress: ["CLM-1002"],
+    error: null,
+  },
   created_at: "2026-11-05T12:00:00Z",
   completed_at: "2026-11-05T12:01:00Z",
-  todos: [
+  stopped_at: null,
+  model_cost: 0.125,
+  prompt_tokens: 1000,
+  completion_tokens: 100,
+  total_tokens: 1100,
+  active_seconds: 12.5,
+  wall_seconds: 30.25,
+  claims: [
     {
       claim_id: "CLM-1001",
       position: 1,
-      status: "to_do",
+      status: "waiting",
       attempts: 0,
       result: null,
       error: null,
+      started_at: null,
+      finished_at: null,
+      model_cost: 0,
+      active_seconds: 0,
     },
     {
       claim_id: "CLM-1002",
@@ -77,7 +98,11 @@ const completedRun: AgentRun = {
       status: "in_progress",
       attempts: 1,
       result: null,
-      error: null,
+      error: "Timed out",
+      started_at: "2026-11-05T12:00:00Z",
+      finished_at: null,
+      model_cost: 0.025,
+      active_seconds: 5,
     },
     {
       claim_id: "CLM-1003",
@@ -86,6 +111,10 @@ const completedRun: AgentRun = {
       attempts: 0,
       result: "Approve $3,750.00",
       error: null,
+      started_at: "2026-11-05T12:00:00Z",
+      finished_at: "2026-11-05T12:00:10Z",
+      model_cost: 0.05,
+      active_seconds: 10,
     },
     {
       claim_id: "CLM-1004",
@@ -94,6 +123,10 @@ const completedRun: AgentRun = {
       attempts: 2,
       result: "Provider failed",
       error: "Provider failed",
+      started_at: "2026-11-05T12:00:00Z",
+      finished_at: "2026-11-05T12:00:20Z",
+      model_cost: 0.05,
+      active_seconds: 20,
     },
   ],
 };
@@ -110,21 +143,19 @@ function response(body: unknown, status = 200) {
   });
 }
 
-function mockApi(currentRun: AgentRun | null = null) {
-  const queue = "Plan the queue and keep the to-do list current.";
+function mockApi(currentRun: DispatchRun | null = null) {
   const claim = "Read the policy wording and claims manual.";
   const fetchMock = vi.fn((input: RequestInfo | URL) => {
     const url = requestUrl(input);
     if (url === "/api/claims") return Promise.resolve(response(claims));
-    if (url === "/api/runs/current")
+    if (url === "/api/dispatches/current")
       return Promise.resolve(response(currentRun));
-    if (url === "/api/agent/instructions") {
-      return Promise.resolve(response({ queue, claim }));
-    }
+    if (url === "/api/agent/instructions")
+      return Promise.resolve(response({ claim }));
     return Promise.resolve(response({ detail: "Not found" }, 404));
   });
   vi.stubGlobal("fetch", fetchMock);
-  return { fetchMock, queue, claim };
+  return { fetchMock, claim };
 }
 
 afterEach(() => {
@@ -174,17 +205,16 @@ it("shows a queue loading failure", async () => {
   );
 });
 
-it("shows both agent instruction sets as read-only text", async () => {
-  const { queue, claim } = mockApi();
+it("shows only the claim agent instructions as read-only text", async () => {
+  const { claim } = mockApi();
   render(<App />);
   await screen.findByText("Maya Patel");
 
   fireEvent.click(screen.getByRole("button", { name: "Agent instructions" }));
 
-  expect(await screen.findByText(queue)).toBeDefined();
-  expect(screen.getByText(claim)).toBeDefined();
-  expect(screen.getByRole("heading", { name: "Queue agent" })).toBeDefined();
+  expect(await screen.findByText(claim)).toBeDefined();
   expect(screen.getByRole("heading", { name: "Claim agent" })).toBeDefined();
+  expect(screen.queryByRole("heading", { name: "Queue agent" })).toBeNull();
   expect(screen.queryByRole("textbox")).toBeNull();
 });
 
@@ -194,7 +224,8 @@ it("shows an instructions loading failure", async () => {
     vi.fn((input: RequestInfo | URL) => {
       const url = requestUrl(input);
       if (url === "/api/claims") return Promise.resolve(response(claims));
-      if (url === "/api/runs/current") return Promise.resolve(response(null));
+      if (url === "/api/dispatches/current")
+        return Promise.resolve(response(null));
       return Promise.resolve(response({ detail: "Unavailable" }, 503));
     }),
   );
@@ -209,42 +240,54 @@ it("shows an instructions loading failure", async () => {
   );
 });
 
-it("shows the current run, model, summary and all to-do states", async () => {
+it("shows dispatch states, record-built summary, model and usage totals", async () => {
   mockApi(completedRun);
   render(<App />);
 
   expect(
-    await screen.findByText("4 claims handled: 3 done, 1 left for handler."),
+    await screen.findByText("2 approved, 1 declined, 1 referred."),
+  ).toBeDefined();
+  expect(screen.getByText("CLM-1003: $3,750.00")).toBeDefined();
+  expect(
+    screen.getByText("Still in progress for the next dispatch"),
   ).toBeDefined();
   expect(screen.getByText("openai/gpt-6-luna")).toBeDefined();
-  expect(screen.getByText("To do", { selector: ".todo-status" })).toBeDefined();
+  expect(screen.getByText("Reasoning: low")).toBeDefined();
+  expect(screen.getByText("Model cost: $0.125")).toBeDefined();
+  expect(screen.getByText("Active work: 12.5 s")).toBeDefined();
+  expect(screen.getByText("Run time: 30.3 s")).toBeDefined();
   expect(
-    screen.getByText("In progress", { selector: ".todo-status" }),
+    screen.getByText("Waiting", { selector: ".dispatch-status" }),
   ).toBeDefined();
-  expect(screen.getByText("Done", { selector: ".todo-status" })).toBeDefined();
   expect(
-    screen.getByText("Left for handler", { selector: ".todo-status" }),
+    screen.getByText("In progress", { selector: ".dispatch-status" }),
+  ).toBeDefined();
+  expect(
+    screen.getByText("Done", { selector: ".dispatch-status" }),
+  ).toBeDefined();
+  expect(
+    screen.getByText("Left for handler", { selector: ".dispatch-status" }),
   ).toBeDefined();
   expect(screen.getByText("Provider failed")).toBeDefined();
 });
 
-it("validates the claim cap", async () => {
+it("validates the agents-at-once boundaries", async () => {
   mockApi();
   render(<App />);
   await screen.findByText("Maya Patel");
+  const input = screen.getByLabelText("Agents at once");
 
-  fireEvent.change(screen.getByLabelText("Claim cap"), {
-    target: { value: "0" },
-  });
-  fireEvent.click(screen.getByRole("button", { name: "Run queue" }));
-
-  expect(screen.getByRole("alert")).toHaveProperty(
-    "textContent",
-    "Claim cap must be a whole number from 1 to 25.",
-  );
+  for (const value of ["0", "26", "1.5"]) {
+    fireEvent.change(input, { target: { value } });
+    fireEvent.click(screen.getByRole("button", { name: "Start dispatch" }));
+    expect(screen.getByRole("alert")).toHaveProperty(
+      "textContent",
+      "Agents at once must be a whole number from 1 to 25.",
+    );
+  }
 });
 
-it("starts one capped run and stops polling after completion", async () => {
+it("starts one dispatch with N and stops polling after completion", async () => {
   const running = {
     ...completedRun,
     status: "in_progress" as const,
@@ -255,47 +298,103 @@ it("starts one capped run and stops polling after completion", async () => {
   const fetchMock = vi.fn((input: RequestInfo | URL, init?: RequestInit) => {
     const url = requestUrl(input);
     if (url === "/api/claims") return Promise.resolve(response(claims));
-    if (url === "/api/runs" && init?.method === "POST") {
+    if (url === "/api/dispatches" && init?.method === "POST") {
       started = true;
       return Promise.resolve(response(running, 202));
     }
-    if (url === "/api/runs/current") {
+    if (url === "/api/dispatches/current")
       return Promise.resolve(response(started ? completedRun : null));
-    }
     return Promise.resolve(response({ detail: "Not found" }, 404));
   });
   vi.stubGlobal("fetch", fetchMock);
   render(<App />);
   await screen.findByText("Maya Patel");
 
-  fireEvent.click(screen.getByRole("button", { name: "Run queue" }));
+  fireEvent.change(screen.getByLabelText("Agents at once"), {
+    target: { value: "5" },
+  });
+  fireEvent.click(screen.getByRole("button", { name: "Start dispatch" }));
 
   expect(
-    await screen.findByText("4 claims handled: 3 done, 1 left for handler."),
+    await screen.findByText("2 approved, 1 declined, 1 referred."),
   ).toBeDefined();
   const post = fetchMock.mock.calls.find(
-    ([input]) => requestUrl(input) === "/api/runs",
+    ([input]) => requestUrl(input) === "/api/dispatches",
   );
   const body = post?.[1]?.body;
-  if (typeof body !== "string") throw new Error("Missing run request body");
-  const payload = JSON.parse(body) as {
-    thread_id: unknown;
-    claim_cap: unknown;
-  };
-  expect(typeof payload.thread_id).toBe("string");
-  expect(payload.claim_cap).toBe(5);
+  if (typeof body !== "string")
+    throw new Error("Missing dispatch request body");
+  expect(JSON.parse(body) as { concurrency: unknown }).toEqual({
+    concurrency: 5,
+  });
   await waitFor(() => {
     expect(
-      screen.getByText("4 claims handled: 3 done, 1 left for handler."),
+      screen.getByText("2 approved, 1 declined, 1 referred."),
     ).toBeDefined();
   });
   const reads = fetchMock.mock.calls.filter(
-    ([input]) => requestUrl(input) === "/api/runs/current",
+    ([input]) => requestUrl(input) === "/api/dispatches/current",
   ).length;
   await new Promise((resolve) => setTimeout(resolve, 600));
   expect(
     fetchMock.mock.calls.filter(
-      ([input]) => requestUrl(input) === "/api/runs/current",
+      ([input]) => requestUrl(input) === "/api/dispatches/current",
     ),
   ).toHaveLength(reads);
 }, 5000);
+
+it("shows an offline agent service without creating a dispatch", async () => {
+  const fetchMock = vi.fn((input: RequestInfo | URL, init?: RequestInit) => {
+    const url = requestUrl(input);
+    if (url === "/api/claims") return Promise.resolve(response(claims));
+    if (url === "/api/dispatches/current")
+      return Promise.resolve(response(null));
+    if (url === "/api/dispatches" && init?.method === "POST")
+      return Promise.reject(new Error("The agent service is not running"));
+    return Promise.resolve(response({ detail: "Not found" }, 404));
+  });
+  vi.stubGlobal("fetch", fetchMock);
+  render(<App />);
+  await screen.findByText("Maya Patel");
+
+  fireEvent.click(screen.getByRole("button", { name: "Start dispatch" }));
+
+  expect(await screen.findByRole("alert")).toHaveProperty(
+    "textContent",
+    "The agent service is not running",
+  );
+  expect(screen.queryByText("Dispatch 1")).toBeNull();
+});
+
+it("shows a second-start conflict", async () => {
+  const fetchMock = vi.fn((input: RequestInfo | URL, init?: RequestInit) => {
+    const url = requestUrl(input);
+    if (url === "/api/claims") return Promise.resolve(response(claims));
+    if (url === "/api/dispatches/current")
+      return Promise.resolve(response(null));
+    if (url === "/api/dispatches" && init?.method === "POST")
+      return Promise.resolve(
+        response({ detail: "Another dispatch or evaluation is running" }, 409),
+      );
+    return Promise.resolve(response({ detail: "Not found" }, 404));
+  });
+  vi.stubGlobal("fetch", fetchMock);
+  render(<App />);
+  await screen.findByText("Maya Patel");
+
+  fireEvent.click(screen.getByRole("button", { name: "Start dispatch" }));
+
+  expect(await screen.findByRole("alert")).toHaveProperty(
+    "textContent",
+    "Another dispatch or evaluation is running",
+  );
+});
+
+it("disables starting while a dispatch is active", async () => {
+  mockApi({ ...completedRun, status: "in_progress" });
+  render(<App />);
+
+  expect(
+    await screen.findByRole("button", { name: "Start dispatch" }),
+  ).toHaveProperty("disabled", true);
+});

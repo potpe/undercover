@@ -117,26 +117,49 @@ export interface DocumentRead {
   title: string;
 }
 
-export interface RunTodo {
+export interface RunClaim {
   claim_id: string;
   position: number;
-  status: "to_do" | "in_progress" | "done" | "left_for_handler";
+  status: "waiting" | "in_progress" | "done" | "left_for_handler";
   attempts: number;
   result: string | null;
   error: string | null;
+  started_at: string | null;
+  finished_at: string | null;
+  model_cost: number;
+  active_seconds: number;
 }
 
-export interface AgentRun {
+export interface DispatchSummary {
+  approved: number;
+  declined: number;
+  referred: number;
+  waiting_for_sign_off: { claim_id: string; payout: number }[];
+  left_for_handler: string[];
+  in_progress: string[];
+  error: string | null;
+}
+
+export interface DispatchRun {
   run_id: number;
-  thread_id: string;
-  claim_cap: number;
-  target_claim_id: string | null;
-  model_name: string | null;
-  status: "in_progress" | "completed" | "failed";
-  summary: string | null;
+  kind: "dispatch" | "evaluation";
+  concurrency: number;
+  status: "in_progress" | "completed" | "stopped";
+  model_name: string;
+  reasoning_effort: string | null;
+  evaluation_set: string | null;
+  tiny: boolean | null;
+  summary: DispatchSummary | null;
   created_at: string;
   completed_at: string | null;
-  todos: RunTodo[];
+  stopped_at: string | null;
+  claims: RunClaim[];
+  model_cost: number;
+  prompt_tokens: number;
+  completion_tokens: number;
+  total_tokens: number;
+  active_seconds: number;
+  wall_seconds: number;
 }
 
 export interface ClaimBundle {
@@ -152,6 +175,9 @@ export interface ClaimBundle {
   signed_off_at: string | null;
   paid_at: string | null;
   agent_thread_id: string | null;
+  work_run_id: number | null;
+  failed_attempts: number;
+  evaluation_run_id: number | null;
   activity: Activity[];
   documents_read: DocumentRead[];
 }
@@ -192,19 +218,16 @@ export function getClaim(claimId: string): Promise<ClaimBundle> {
   return request<ClaimBundle>(`/api/claims/${claimId}`);
 }
 
-export function getInstructions(): Promise<{ queue: string; claim: string }> {
-  return request<{ queue: string; claim: string }>("/api/agent/instructions");
+export function getInstructions(): Promise<{ claim: string }> {
+  return request<{ claim: string }>("/api/agent/instructions");
 }
 
-export function getCurrentRun(): Promise<AgentRun | null> {
-  return request<AgentRun | null>("/api/runs/current");
+export function getCurrentDispatch(): Promise<DispatchRun | null> {
+  return request<DispatchRun | null>("/api/dispatches/current");
 }
 
-export function createQueueRun(
-  claimCap: number,
-  threadId: string,
-): Promise<AgentRun> {
-  return postJson("/api/runs", { claim_cap: claimCap, thread_id: threadId });
+export function startDispatch(concurrency: number): Promise<DispatchRun> {
+  return postJson("/api/dispatches", { concurrency });
 }
 
 export function listHandlers(): Promise<Handler[]> {

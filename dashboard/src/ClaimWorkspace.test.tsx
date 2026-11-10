@@ -126,6 +126,9 @@ function makeBundle(
     signed_off_at: null,
     paid_at: null,
     agent_thread_id: null,
+    work_run_id: null,
+    failed_attempts: 0,
+    evaluation_run_id: null,
     activity,
     documents_read: [
       {
