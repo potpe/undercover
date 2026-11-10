@@ -199,13 +199,17 @@ def save_work_period(
     response.raise_for_status()
 
 
+def run_tags(run_id: int | None, run_kind: str) -> list[str]:
+    return [f"{run_kind}-{run_id}"] if run_id is not None else []
+
+
 def claim_config(
     thread_id: str,
     callbacks: list[Any],
     run_id: int | None,
     run_kind: str,
 ) -> RunnableConfig:
-    tags = [f"{run_kind}-{run_id}"] if run_id is not None else []
+    tags = run_tags(run_id, run_kind)
     return {
         "configurable": {"thread_id": thread_id},
         "callbacks": callbacks,
@@ -407,7 +411,9 @@ def run_with_context(
         started = perf_counter()
         try:
             log_activity(claim_id, f"Using model {selected_model.model_name}")
-            with trace_claim(claim_id, thread_id) as callbacks:
+            with trace_claim(
+                claim_id, thread_id, run_tags(run_id, run_kind)
+            ) as callbacks:
                 config["callbacks"] = callbacks
                 result = graph.invoke(graph_input, config, durability="sync")
                 if "__interrupt__" in result:

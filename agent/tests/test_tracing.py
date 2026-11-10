@@ -41,7 +41,10 @@ def test_claim_tracing_uses_stable_claim_thread_session(monkeypatch):
         assert len(callbacks) == 1
         assert isinstance(callbacks[0], FakeHandler)
 
-    assert {"session_id": "CLM-1003:run-1:CLM-1003:attempt-1"} in events
+    assert any(
+        event.get("session_id") == "CLM-1003:run-1:CLM-1003:attempt-1"
+        for event in events
+    )
     with tracing.trace_claim("CLM-1003", "run-1:CLM-1003:attempt-1"):
         pass
     with tracing.trace_claim("CLM-1003", "run-1:CLM-1003:attempt-2"):
@@ -54,6 +57,12 @@ def test_claim_tracing_uses_stable_claim_thread_session(monkeypatch):
         "CLM-1003:run-1:CLM-1003:attempt-2",
     ]
     assert events[-1] == {"flushed": True}
+    with tracing.trace_claim("CLM-1003", "thread", ["dispatch-7"]):
+        pass
+    assert {
+        "session_id": "CLM-1003:thread",
+        "tags": ["dispatch-7"],
+    } in events
 
 
 def test_claim_config_tags_each_run_and_leaves_direct_work_untagged():

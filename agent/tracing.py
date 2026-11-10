@@ -13,7 +13,9 @@ LANGFUSE_KEYS = ("LANGFUSE_SECRET_KEY", "LANGFUSE_PUBLIC_KEY", "LANGFUSE_BASE_UR
 
 
 @contextmanager
-def trace_claim(claim_id: str, thread_id: str) -> Iterator[list[BaseCallbackHandler]]:
+def trace_claim(
+    claim_id: str, thread_id: str, tags: list[str] | None = None
+) -> Iterator[list[BaseCallbackHandler]]:
     if not all(os.getenv(key) for key in LANGFUSE_KEYS):
         yield []
         return
@@ -26,7 +28,7 @@ def trace_claim(claim_id: str, thread_id: str) -> Iterator[list[BaseCallbackHand
             langfuse.start_as_current_observation(
                 as_type="span", name=f"Claim {claim_id}"
             ),
-            propagate_attributes(session_id=session_id),
+            propagate_attributes(session_id=session_id, tags=tags or []),
         ):
             yield [cast(BaseCallbackHandler, handler)]
     finally:
