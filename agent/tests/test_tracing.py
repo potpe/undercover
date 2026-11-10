@@ -1,6 +1,6 @@
 from contextlib import contextmanager
 
-from agent import tracing
+from agent import main, tracing
 
 
 def test_missing_langfuse_keys_disable_tracing(monkeypatch):
@@ -54,3 +54,13 @@ def test_claim_tracing_uses_stable_claim_thread_session(monkeypatch):
         "CLM-1003:run-1:CLM-1003:attempt-2",
     ]
     assert events[-1] == {"flushed": True}
+
+
+def test_claim_config_tags_each_run_and_leaves_direct_work_untagged():
+    dispatch = main.claim_config("thread", [], 7, "dispatch")
+    evaluation = main.claim_config("thread", [], 8, "evaluation")
+    direct = main.claim_config("thread", [], None, "dispatch")
+
+    assert dispatch.get("metadata") == {"langfuse_tags": ["dispatch-7"]}
+    assert evaluation.get("metadata") == {"langfuse_tags": ["evaluation-8"]}
+    assert direct.get("metadata") == {}

@@ -11,7 +11,7 @@ from fastapi import BackgroundTasks, FastAPI
 from pydantic import BaseModel
 
 from agent.main import backend, current_bundle
-from agent.main import run as claim_run
+from agent.main import run_with_context as claim_run
 from agent.queue import run as queue_run
 from backend.runs import fail_queue_run
 
@@ -22,6 +22,7 @@ _run_locks: dict[int, Lock] = {}
 
 class ClaimWorkRequest(BaseModel):
     thread_id: str
+    run_id: int | None
 
 
 class ClaimWorkResponse(BaseModel):
@@ -32,10 +33,12 @@ class AcceptedResponse(BaseModel):
     status: Literal["accepted"]
 
 
-def run_claim_locked(claim_id: str, thread_id: str) -> str:
+def run_claim_locked(claim_id: str, thread_id: str, run_id: int | None = None) -> str:
     lock = _claim_locks.setdefault(claim_id, Lock())
     with lock:
-        return claim_run(claim_id, thread_id)
+        if run_id is None:
+            return claim_run(claim_id, thread_id)
+        return claim_run(claim_id, thread_id, run_id=run_id)
 
 
 def report_failure(claim_id: str, error: str) -> None:
@@ -50,7 +53,7 @@ def resume_claim(claim_id: str) -> str:
     if not thread_id:
         raise RuntimeError("Claim has no saved agent thread")
     try:
-        return run_claim_locked(claim_id, thread_id)
+        return run_claim_locked(claim_id, thread_id, bundle["work_run_id"])
     except Exception as error:
         bundle = current_bundle(claim_id)
         if bundle["claim"]["status"] in ("decided", "waiting_for_sign_off"):
@@ -142,7 +145,9 @@ def health() -> dict[str, str]:
 @app.post("/claims/{claim_id}/work", operation_id="work_claim")
 def work(claim_id: str, request: ClaimWorkRequest) -> ClaimWorkResponse:
     """Work one claim on its supplied durable thread."""
-    return ClaimWorkResponse(result=run_claim_locked(claim_id, request.thread_id))
+    return ClaimWorkResponse(
+        result=run_claim_locked(claim_id, request.thread_id, request.run_id)
+    )
 
 
 @app.post("/claims/{claim_id}/resume", operation_id="resume_claim", status_code=202)

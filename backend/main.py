@@ -16,6 +16,8 @@ from backend.database import (
     list_claims,
     list_handlers,
     read_document_section,
+    record_model_call,
+    record_work_period,
     search_document,
 )
 from backend.models import (
@@ -31,6 +33,7 @@ from backend.models import (
     FailureRequest,
     FinishRunRequest,
     Instructions,
+    ModelCallRequest,
     PaymentRequest,
     PayoutRequest,
     PayoutResponse,
@@ -40,6 +43,7 @@ from backend.models import (
     RunResponse,
     SignOffRequest,
     WorkOutcome,
+    WorkPeriodRequest,
     WorkRequest,
 )
 from backend.payout import calculate_claim_payout
@@ -85,7 +89,12 @@ def notify_agent_resume(claim_id: str) -> None:
 
 
 def run_claim_via_service(claim_id: str, thread_id: str) -> str:
-    response = agent_post(f"/claims/{claim_id}/work", 120, {"thread_id": thread_id})
+    run_id = int(thread_id.split(":", 1)[0])
+    response = agent_post(
+        f"/claims/{claim_id}/work",
+        120,
+        {"thread_id": thread_id, "run_id": run_id},
+    )
     response.raise_for_status()
     return response.json()["result"]
 
@@ -198,6 +207,22 @@ def work_run_claim(run_id: int, request: WorkRequest) -> WorkOutcome:
 def finish_agent_run(run_id: int, request: FinishRunRequest) -> AgentRun:
     """Complete a run after checking for unfinished selected claims."""
     return AgentRun(**finish_run(run_id, request.summary))
+
+
+@app.post("/api/claims/{claim_id}/model-calls", operation_id="record_model_call")
+def model_call(claim_id: str, request: ModelCallRequest) -> ClaimBundle:
+    """Record the exact OpenRouter usage reported for one model call."""
+    if not record_model_call(claim_id, request.model_dump()):
+        raise HTTPException(status_code=404, detail="Claim not found")
+    return claim(claim_id)
+
+
+@app.post("/api/claims/{claim_id}/work-periods", operation_id="record_work_period")
+def work_period(claim_id: str, request: WorkPeriodRequest) -> ClaimBundle:
+    """Record one period of active agent work on a claim."""
+    if not record_work_period(claim_id, request.model_dump()):
+        raise HTTPException(status_code=404, detail="Claim not found")
+    return claim(claim_id)
 
 
 @app.post("/api/claims/{claim_id}/activity", operation_id="record_activity")

@@ -181,7 +181,7 @@ test("the dashboard shows run to-dos and the sections read", async ({
     thread_id: "browser",
     claim_cap: 5,
     target_claim_id: null,
-    model_name: "deepseek/deepseek-v4.1-flash",
+    model_name: "openai/gpt-6-luna",
     status: "completed",
     summary: "5 claims handled: 4 done, 1 left for handler.",
     created_at: "2026-11-05T12:00:00Z",
@@ -245,7 +245,7 @@ test("the dashboard shows run to-dos and the sections read", async ({
   await expect(
     page.getByText("5 claims handled: 4 done, 1 left for handler."),
   ).toBeVisible();
-  await expect(page.getByText("deepseek/deepseek-v4.1-flash")).toBeVisible();
+  await expect(page.getByText("openai/gpt-6-luna")).toBeVisible();
   await expect(page.locator(".todo-list li")).toHaveCount(5);
   await expect(
     page.locator(".todo-status").getByText("Left for handler", { exact: true }),

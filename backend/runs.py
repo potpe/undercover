@@ -1,3 +1,4 @@
+import os
 from collections.abc import Callable
 from typing import Any
 
@@ -10,12 +11,52 @@ from backend.database import (
     connect,
     insert_activity,
     iso,
+    model_calls_table,
     run_todos_table,
     runs_table,
     timestamp,
+    work_periods_table,
 )
 from backend.models import PaymentRequest
 from backend.workflow import record_payment
+
+
+def run_usage(run_id: int | None) -> dict[str, Any]:
+    with connect() as connection:
+        model_filter = (
+            model_calls_table.c.run_id.is_(None)
+            if run_id is None
+            else model_calls_table.c.run_id == run_id
+        )
+        model = connection.execute(
+            select(
+                func.coalesce(func.sum(model_calls_table.c.cost), 0),
+                func.coalesce(func.sum(model_calls_table.c.prompt_tokens), 0),
+                func.coalesce(func.sum(model_calls_table.c.completion_tokens), 0),
+                func.coalesce(func.sum(model_calls_table.c.total_tokens), 0),
+            ).where(model_filter)
+        ).one()
+        work_filter = (
+            work_periods_table.c.run_id.is_(None)
+            if run_id is None
+            else work_periods_table.c.run_id == run_id
+        )
+        work = connection.execute(
+            select(
+                func.coalesce(func.sum(work_periods_table.c.seconds), 0),
+                func.min(work_periods_table.c.started_at),
+                func.max(work_periods_table.c.finished_at),
+            ).where(work_filter)
+        ).one()
+    return {
+        "model_cost": float(model[0]),
+        "prompt_tokens": int(model[1]),
+        "completion_tokens": int(model[2]),
+        "total_tokens": int(model[3]),
+        "active_seconds": float(work[0]),
+        "first_started_at": iso(work[1]),
+        "last_finished_at": iso(work[2]),
+    }
 
 
 def run_record(connection: Connection, row: RowMapping) -> dict[str, Any]:
@@ -34,6 +75,7 @@ def run_record(connection: Connection, row: RowMapping) -> dict[str, Any]:
         "claim_cap": row["claim_cap"],
         "target_claim_id": row["target_claim_id"],
         "model_name": row["model_name"],
+        "reasoning_effort": row["reasoning_effort"],
         "status": row["status"],
         "summary": row["summary"],
         "created_at": iso(row["created_at"]),
@@ -176,10 +218,15 @@ def save_plan(run_id: int, claim_ids: list[str], model_name: str) -> dict[str, A
                     attempts=0,
                 )
             )
+        reasoning_effort = (
+            "low"
+            if model_name == "openai/gpt-6-luna" and not os.getenv("MODEL_NAME")
+            else None
+        )
         connection.execute(
             update(runs_table)
             .where(runs_table.c.run_id == run_id)
-            .values(model_name=model_name)
+            .values(model_name=model_name, reasoning_effort=reasoning_effort)
         )
     return require_run(run_id)
 
@@ -349,7 +396,11 @@ def work_claim(
             connection.execute(
                 update(claims_table)
                 .where(claims_table.c.claim_id == claim_id)
-                .values(status="in_progress", agent_thread_id=thread_id)
+                .values(
+                    status="in_progress",
+                    agent_thread_id=thread_id,
+                    work_run_id=run_id,
+                )
             )
             connection.execute(
                 update(run_todos_table)

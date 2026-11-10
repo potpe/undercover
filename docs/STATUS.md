@@ -1,6 +1,6 @@
 # Status
 
-The UnderCover durable-state build is complete.
+The swarm build is in progress. Phase 1 is complete.
 
 - `backend/`: FastAPI and SQLAlchemy Core, using SQLite offline or Supabase Postgres through `DATABASE_URL`. Postgres uses schema `undercover` and at most four pooled connections per process. APIs cover claims, section-level document reads, deterministic payouts, capped runs, durable to-dos, recovery, decisions, sign-off, payment and summaries. The backend enforces the $1,000 sign-off rule and treats identical decision/payment replays as done.
 - `agent/`: a hand-written synchronous LangGraph claim graph with API-only claim, document and payout tools, structured decisions, `interrupt()` sign-off waits and graph-owned payment. The queue agent remains LangChain `create_agent`. Checkpoints use Supabase `PostgresSaver` or local SQLite with sync durability. Stable claim/thread Langfuse sessions include work before and after a pause.
@@ -21,7 +21,7 @@ Set these values in `.env` for hosted/live work:
 - `OPENROUTER_API_KEY`: the OpenRouter key.
 - `LANGFUSE_SECRET_KEY`, `LANGFUSE_PUBLIC_KEY` and `LANGFUSE_BASE_URL`: the Langfuse project connection.
 
-`MODEL_NAME` is optional, for example `MODEL_NAME=openrouter/free`; the default is `deepseek/deepseek-v4.1-flash` with low reasoning. `UNDERCOVER_AGENT` is optional and defaults to `http://127.0.0.1:8002`.
+`MODEL_NAME` is optional, for example `MODEL_NAME=openrouter/free`; the default is `openai/gpt-6-luna` with low reasoning. `UNDERCOVER_AGENT` is optional and defaults to `http://127.0.0.1:8002`.
 
 Tests do not read `.env` and need none of these services.
 
@@ -57,8 +57,8 @@ This runs Ruff, Pyright, pytest with at least 80% coverage, Prettier, ESLint, ts
 
 ## Verification
 
-Final verification: with `.env` absent, `npm run check` passed 98 Python tests at 93.17% coverage, 17 Vitest tests at 91.93% statement coverage and seven Playwright tests without hosted services or model calls.
+Swarm Phase 1: `npm run check:python` passed 102 tests with 93.43% coverage. The claim graph records exact OpenRouter token/cost usage and active work periods by claim/run, uses `openai/gpt-6-luna` with low reasoning by default, and adds run tags while retaining claim/thread Langfuse sessions. Controlled tests prove sign-off waiting time is excluded. The previous full Python, TypeScript and Playwright gate remains the baseline for later phases.
 
-After reseeding Supabase, the default DeepSeek run capped at five completed all five selected claims; 20 remained waiting. A stopped undecided claim resumed on its original thread with zero attempts and one decision/payment, and the stopped queue finished its original plan. `CLM-1003` waited for Dana's sign-off, showed In progress, then paid $3,750.00 after 3.71 seconds with one decision and one payment. The current Langfuse session contains traces before and after sign-off with no errors in the final run. Supabase showed eight `postgres` connections during live work, below the 12-connection limit. Desktop/mobile browser checks had no overflow or console errors. `MODEL_NAME=openrouter/free` was restored afterward.
+The previous durable-state verification used DeepSeek and completed five selected claims; 20 remained waiting. A stopped undecided claim resumed on its original thread with zero attempts and one decision/payment, and the stopped queue finished its original plan. `CLM-1003` waited for Dana's sign-off, showed In progress, then paid $3,750.00 after 3.71 seconds with one decision and one payment. The current Langfuse session contains traces before and after sign-off with no errors in the final run. Supabase showed eight `postgres` connections during live work, below the 12-connection limit. Desktop/mobile browser checks had no overflow or console errors. `MODEL_NAME=openrouter/free` was restored afterward.
 
 Supabase reports RLS disabled on the `undercover` product tables. No remediation was applied in this build; review access policies before exposing the database to client applications.

@@ -1,3 +1,4 @@
+from datetime import datetime
 from typing import Any, Literal
 
 from pydantic import BaseModel, Field
@@ -134,11 +135,30 @@ class AgentRun(BaseModel):
     claim_cap: int
     target_claim_id: str | None
     model_name: str | None
+    reasoning_effort: str | None
     status: Literal["in_progress", "completed", "failed"]
     summary: str | None
     created_at: str
     completed_at: str | None
     todos: list[RunTodo]
+
+
+class ModelCallRequest(BaseModel):
+    run_id: int | None
+    model_name: str = Field(min_length=1)
+    reasoning_effort: str | None
+    prompt_tokens: int = Field(ge=0)
+    completion_tokens: int = Field(ge=0)
+    total_tokens: int = Field(ge=0)
+    cost: float = Field(ge=0)
+
+
+class WorkPeriodRequest(BaseModel):
+    run_id: int | None
+    thread_id: str = Field(min_length=1)
+    started_at: datetime
+    finished_at: datetime
+    seconds: float = Field(ge=0)
 
 
 class ActivityRequest(BaseModel):
@@ -199,5 +219,6 @@ class ClaimBundle(BaseModel):
     signed_off_at: str | None
     paid_at: str | None
     agent_thread_id: str | None
+    work_run_id: int | None
     activity: list[Activity]
     documents_read: list[DocumentRead]

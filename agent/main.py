@@ -1,6 +1,8 @@
 """The durable UnderCover claim graph and its backend tools."""
 
 import os
+from datetime import UTC, datetime
+from time import perf_counter
 from typing import Annotated, Any, Literal, TypedDict, cast
 
 import httpx
@@ -17,11 +19,18 @@ from pydantic import SecretStr
 
 from agent.checkpoints import claim_checkpointer
 from agent.tracing import trace_claim
-from backend.models import Benefit, DecisionKind, DecisionRequest, PayoutLine
+from backend.models import (
+    Benefit,
+    DecisionKind,
+    DecisionRequest,
+    ModelCallRequest,
+    PayoutLine,
+    WorkPeriodRequest,
+)
 
 BACKEND_URL = "http://localhost:8000"
 OPENROUTER_BASE_URL = "https://openrouter.ai/api/v1"
-DEFAULT_MODEL = "deepseek/deepseek-v4.1-flash"
+DEFAULT_MODEL = "openai/gpt-6-luna"
 MAX_MODEL_CALLS = 30
 
 
@@ -38,6 +47,8 @@ class ClaimState(TypedDict):
     claim_status: str
     approved_by: str | None
     result: str
+    run_id: int | None
+    run_kind: str
 
 
 def backend() -> httpx.Client:
@@ -141,8 +152,69 @@ def save_payment(claim_id: str, amount: float) -> dict[str, Any]:
     return response.json()
 
 
+def utcnow() -> datetime:
+    return datetime.now(UTC)
+
+
+def save_model_usage(state: ClaimState, selected_model: Any, response: Any) -> None:
+    usage = response.response_metadata.get("token_usage")
+    if not usage:
+        return
+    request = ModelCallRequest(
+        run_id=state["run_id"],
+        model_name=selected_model.model_name,
+        reasoning_effort=selected_model.reasoning_effort,
+        prompt_tokens=usage["prompt_tokens"],
+        completion_tokens=usage["completion_tokens"],
+        total_tokens=usage["total_tokens"],
+        cost=usage["cost"],
+    )
+    with backend() as client:
+        result = client.post(
+            f"/api/claims/{state['claim_id']}/model-calls",
+            json=request.model_dump(),
+        )
+    result.raise_for_status()
+
+
+def save_work_period(
+    claim_id: str,
+    thread_id: str,
+    run_id: int | None,
+    started_at: datetime,
+    started: float,
+) -> None:
+    request = WorkPeriodRequest(
+        run_id=run_id,
+        thread_id=thread_id,
+        started_at=started_at,
+        finished_at=utcnow(),
+        seconds=perf_counter() - started,
+    )
+    with backend() as client:
+        response = client.post(
+            f"/api/claims/{claim_id}/work-periods",
+            json=request.model_dump(mode="json"),
+        )
+    response.raise_for_status()
+
+
+def claim_config(
+    thread_id: str,
+    callbacks: list[Any],
+    run_id: int | None,
+    run_kind: str,
+) -> RunnableConfig:
+    tags = [f"{run_kind}-{run_id}"] if run_id is not None else []
+    return {
+        "configurable": {"thread_id": thread_id},
+        "callbacks": callbacks,
+        "metadata": {"langfuse_tags": tags} if tags else {},
+    }
+
+
 def model() -> ChatOpenAI:
-    """Return the model named in MODEL_NAME, or DeepSeek V4.1 Flash by default."""
+    """Return the model named in MODEL_NAME, or GPT-6 Luna by default."""
     name = os.getenv("MODEL_NAME")
     return ChatOpenAI(
         model=name or DEFAULT_MODEL,
@@ -183,26 +255,29 @@ def build_claim_graph(
     model_with_tools = selected_model.bind_tools(
         [read_claim, search_documents, read_document_section, calculate_payout]
     )
-    decider = selected_model.with_structured_output(DecisionRequest)
+    decider = selected_model.with_structured_output(DecisionRequest, include_raw=True)
     tools = ToolNode(
         [read_claim, search_documents, read_document_section, calculate_payout]
     )
 
     def agent(state: ClaimState) -> dict[str, Any]:
         response = model_with_tools.invoke([system_message, *state["messages"]])
+        save_model_usage(state, selected_model, response)
         return {
             "messages": [response],
             "model_calls": state.get("model_calls", 0) + 1,
         }
 
     def decide(state: ClaimState) -> dict[str, Any]:
-        result = decider.invoke(
+        structured = decider.invoke(
             [
                 system_message,
                 *state["messages"],
                 HumanMessage("Record your decision on this claim."),
             ]
         )
+        save_model_usage(state, selected_model, structured["raw"])
+        result = structured["parsed"]
         log_activity(
             state["claim_id"],
             f"Decision prepared: {result.decision} for ${result.payout:,.2f}",
@@ -272,16 +347,28 @@ def current_bundle(claim_id: str) -> dict[str, Any]:
 
 
 def run(claim_id: str, thread_id: str) -> str:
+    """Start or continue one claim without a dispatch or evaluation."""
+    return run_with_context(claim_id, thread_id, None, "dispatch")
+
+
+def run_with_context(
+    claim_id: str,
+    thread_id: str,
+    run_id: int | None = None,
+    run_kind: str = "dispatch",
+) -> str:
     """Start or continue one claim on its durable thread."""
     with backend() as client:
         response = client.get("/api/agent/instructions")
     response.raise_for_status()
+    if run_id is None:
+        run_id = current_bundle(claim_id).get("work_run_id")
     selected_model = model()
     with claim_checkpointer() as checkpointer:
         graph = build_claim_graph(
             selected_model, response.json()["claim"], checkpointer
         )
-        config: RunnableConfig = {"configurable": {"thread_id": thread_id}}
+        config = claim_config(thread_id, [], run_id, run_kind)
         saved = graph.get_state(config)
         if saved.created_at is not None and not saved.next:
             return saved.values["result"]
@@ -306,19 +393,26 @@ def run(claim_id: str, thread_id: str) -> str:
                 "claim_status": "in_progress",
                 "approved_by": None,
                 "result": "",
+                "run_id": run_id,
+                "run_kind": run_kind,
             }
-        log_activity(claim_id, f"Using model {selected_model.model_name}")
-        with trace_claim(claim_id, thread_id) as callbacks:
-            config["callbacks"] = callbacks
-            result = graph.invoke(graph_input, config, durability="sync")
-            if "__interrupt__" in result:
-                bundle = current_bundle(claim_id)
-                if bundle["signed_off_by"]:
-                    result = graph.invoke(
-                        Command(resume={"handler_id": bundle["signed_off_by"]}),
-                        config,
-                        durability="sync",
-                    )
+        started_at = utcnow()
+        started = perf_counter()
+        try:
+            log_activity(claim_id, f"Using model {selected_model.model_name}")
+            with trace_claim(claim_id, thread_id) as callbacks:
+                config["callbacks"] = callbacks
+                result = graph.invoke(graph_input, config, durability="sync")
+                if "__interrupt__" in result:
+                    bundle = current_bundle(claim_id)
+                    if bundle["signed_off_by"]:
+                        result = graph.invoke(
+                            Command(resume={"handler_id": bundle["signed_off_by"]}),
+                            config,
+                            durability="sync",
+                        )
+        finally:
+            save_work_period(claim_id, thread_id, run_id, started_at, started)
         if "result" in result:
             return result["result"]
         return result["messages"][-1].text

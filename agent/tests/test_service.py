@@ -14,11 +14,16 @@ class StructuredStub:
         self.result = result
 
     def invoke(self, messages):
-        return self.result
+        return {
+            "raw": AIMessage(content=""),
+            "parsed": self.result,
+            "parsing_error": None,
+        }
 
 
 class StubModel:
     model_name = "stub-model"
+    reasoning_effort = "low"
 
     def __init__(self, replies, result):
         self.replies = iter(replies)
@@ -30,7 +35,7 @@ class StubModel:
     def bind_tools(self, tools, **kwargs):
         return self
 
-    def with_structured_output(self, schema):
+    def with_structured_output(self, schema, **kwargs):
         return StructuredStub(self.result)
 
 
@@ -126,16 +131,20 @@ def test_signoff_resumes_held_claim_through_service_and_pays_once(client, monkey
         json={"claim_ids": ["CLM-1003"], "model_name": "stub-model"},
     )
 
-    def work_via_service(claim_id, thread_id):
+    def work_via_service(claim_id, thread_id, work_run_id=None):
         response = service_client.post(
-            f"/claims/{claim_id}/work", json={"thread_id": thread_id}
+            f"/claims/{claim_id}/work",
+            json={
+                "thread_id": thread_id,
+                "run_id": run_id if work_run_id is None else work_run_id,
+            },
         )
         response.raise_for_status()
         return response.json()["result"]
 
     monkeypatch.setattr(backend_main, "run_claim_via_service", work_via_service)
     worked = client.post(f"/api/runs/{run_id}/work", json={"claim_id": "CLM-1003"})
-    assert worked.json()["status"] == "done"
+    assert worked.json()["status"] == "done", worked.json()["result"]
     held = client.get("/api/claims/CLM-1003").json()
     thread_id = held["agent_thread_id"]
     assert held["claim"]["status"] == "waiting_for_sign_off"

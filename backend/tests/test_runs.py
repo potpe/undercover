@@ -8,7 +8,7 @@ def create_run(client, cap=5, thread_id="thread-queue"):
     return client.post("/api/runs", json={"thread_id": thread_id, "claim_cap": cap})
 
 
-def plan(client, run_id, claim_ids, model="deepseek/deepseek-v4.1-flash"):
+def plan(client, run_id, claim_ids, model="openai/gpt-6-luna"):
     return client.post(
         f"/api/runs/{run_id}/plan",
         json={"claim_ids": claim_ids, "model_name": model},
@@ -44,7 +44,18 @@ def test_run_starts_empty_and_plan_preserves_agent_order(client):
     assert {todo["status"] for todo in todos} == {"to_do"}
     assert all(todo["attempts"] == 0 for todo in todos)
     assert all(todo["result"] is None and todo["error"] is None for todo in todos)
-    assert response.json()["model_name"] == "deepseek/deepseek-v4.1-flash"
+    assert response.json()["model_name"] == "openai/gpt-6-luna"
+    assert response.json()["reasoning_effort"] == "low"
+
+
+def test_run_records_no_reasoning_for_a_model_override(client, monkeypatch):
+    monkeypatch.setenv("MODEL_NAME", "openrouter/free")
+    run_id = create_run(client, cap=1).json()["run_id"]
+
+    response = plan(client, run_id, ["CLM-1001"], model="openrouter/free")
+
+    assert response.json()["model_name"] == "openrouter/free"
+    assert response.json()["reasoning_effort"] is None
 
 
 def test_plan_rejects_over_cap_duplicates_and_underfill(client):

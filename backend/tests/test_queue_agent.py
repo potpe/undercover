@@ -15,7 +15,7 @@ from backend.workflow import record_decision
 
 
 class StubModel(GenericFakeChatModel):
-    model_name: str = "deepseek/deepseek-v4.1-flash"
+    model_name: str = "openai/gpt-6-luna"
 
     def bind_tools(self, tools, **kwargs):
         return self
@@ -101,7 +101,7 @@ def test_queue_agent_works_five_in_its_chosen_order(client, monkeypatch):
     assert response.status_code == 202
     run = client.get("/api/runs/current").json()
     assert run["status"] == "completed"
-    assert run["model_name"] == "deepseek/deepseek-v4.1-flash"
+    assert run["model_name"] == "openai/gpt-6-luna"
     assert run["summary"] == "5 claims handled: 5 done, 0 left for handler."
     assert [todo["claim_id"] for todo in run["todos"]] == ids
     assert {todo["status"] for todo in run["todos"]} == {"done"}

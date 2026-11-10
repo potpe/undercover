@@ -1,3 +1,4 @@
+from datetime import UTC, datetime
 from types import SimpleNamespace
 
 from fastapi.testclient import TestClient
@@ -6,6 +7,7 @@ from langchain_core.messages import AIMessage
 from agent import main
 from backend.main import app
 from backend.models import DecisionKind, DecisionRequest
+from backend.runs import run_usage
 
 
 class StructuredStub:
@@ -13,7 +15,18 @@ class StructuredStub:
         self.decision = decision
 
     def invoke(self, messages):
-        return self.decision
+        raw = AIMessage(
+            content="",
+            response_metadata={
+                "token_usage": {
+                    "prompt_tokens": 50,
+                    "completion_tokens": 10,
+                    "total_tokens": 60,
+                    "cost": 0.005,
+                }
+            },
+        )
+        return {"raw": raw, "parsed": self.decision, "parsing_error": None}
 
 
 class StubModel:
@@ -23,6 +36,7 @@ class StubModel:
         self.messages = iter(messages)
         self.model_name = model_name
         self.structured_decision = structured_decision
+        self.reasoning_effort = None if model_name == "openrouter/free" else "low"
 
     def invoke(self, messages):
         return next(self.messages)
@@ -30,7 +44,7 @@ class StubModel:
     def bind_tools(self, tools, **kwargs):
         return self
 
-    def with_structured_output(self, schema):
+    def with_structured_output(self, schema, **kwargs):
         return StructuredStub(self.structured_decision)
 
 
@@ -125,6 +139,13 @@ def test_graph_approves_and_pays_a_small_claim(client, monkeypatch):
         ),
         AIMessage(content="The claim is covered."),
     ]
+    for index, reply in enumerate(replies, start=1):
+        reply.response_metadata["token_usage"] = {
+            "prompt_tokens": 100 * index,
+            "completion_tokens": 10 * index,
+            "total_tokens": 110 * index,
+            "cost": index / 100,
+        }
     monkeypatch.setattr(
         main,
         "model",
@@ -135,9 +156,15 @@ def test_graph_approves_and_pays_a_small_claim(client, monkeypatch):
         ),
     )
 
-    result = main.run("CLM-1001", "thread-1")
+    result = main.run_with_context("CLM-1001", "thread-1", run_id=1)
 
     assert result == "CLM-1001: approve $420.00; payment recorded"
+    usage = run_usage(1)
+    assert usage["model_cost"] == 0.105
+    assert usage["prompt_tokens"] == 1050
+    assert usage["completion_tokens"] == 110
+    assert usage["total_tokens"] == 1160
+    assert usage["active_seconds"] > 0
     bundle = client.get("/api/claims/CLM-1001").json()
     assert bundle["claim"]["status"] == "decided"
     assert bundle["decision"]["payout"] == 420.0
@@ -211,8 +238,19 @@ def test_graph_interrupts_and_resumes_an_over_limit_claim(client, monkeypatch):
         return StubModel(messages=iter(replies), structured_decision=decision(3750))
 
     monkeypatch.setattr(main, "model", stub_model)
+    monotonic = iter([10.0, 15.0, 1000.0, 1002.0])
+    times = iter(
+        [
+            datetime(2026, 11, 10, 12, 0, tzinfo=UTC),
+            datetime(2026, 11, 10, 12, 0, 5, tzinfo=UTC),
+            datetime(2026, 11, 10, 12, 20, tzinfo=UTC),
+            datetime(2026, 11, 10, 12, 20, 2, tzinfo=UTC),
+        ]
+    )
+    monkeypatch.setattr(main, "perf_counter", lambda: next(monotonic))
+    monkeypatch.setattr(main, "utcnow", lambda: next(times))
 
-    held = main.run("CLM-1003", "thread-held")
+    held = main.run_with_context("CLM-1003", "thread-held", run_id=1)
 
     assert held == "CLM-1003: approve $3,750.00; waiting for sign-off"
     bundle = client.get("/api/claims/CLM-1003").json()
@@ -223,7 +261,7 @@ def test_graph_interrupts_and_resumes_an_over_limit_claim(client, monkeypatch):
     assert state.interrupts[0].value["payout"] == 3750
 
     client.post("/api/claims/CLM-1003/sign-off", json={"handler_id": "HND-01"})
-    paid = main.run("CLM-1003", "thread-held")
+    paid = main.run_with_context("CLM-1003", "thread-held", run_id=1)
 
     assert paid == "CLM-1003: approve $3,750.00; payment recorded"
     bundle = client.get("/api/claims/CLM-1003").json()
@@ -244,8 +282,10 @@ def test_graph_interrupts_and_resumes_an_over_limit_claim(client, monkeypatch):
     ]
     assert len(decisions) == 1
     assert len(payments) == 1
+    assert run_usage(1)["active_seconds"] == 7.0
+    assert run_usage(1)["last_finished_at"] == "2026-11-10T12:20:02+00:00"
 
-    repeated = main.run("CLM-1003", "thread-held")
+    repeated = main.run_with_context("CLM-1003", "thread-held", run_id=1)
     assert repeated == paid
     assert client.get("/api/claims/CLM-1003").json() == bundle
 
@@ -359,7 +399,7 @@ def test_each_claim_thread_has_only_its_own_message(client, monkeypatch):
 def test_model_name(monkeypatch):
     monkeypatch.setenv("OPENROUTER_API_KEY", "test-key")
     monkeypatch.delenv("MODEL_NAME", raising=False)
-    assert main.model().model_name == "deepseek/deepseek-v4.1-flash"
+    assert main.model().model_name == "openai/gpt-6-luna"
     assert main.model().reasoning_effort == "low"
     assert main.model().model_dump()["max_tokens"] == 8192
     monkeypatch.setenv("MODEL_NAME", "openrouter/free")

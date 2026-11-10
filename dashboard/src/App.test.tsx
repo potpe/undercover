@@ -57,7 +57,7 @@ const completedRun: AgentRun = {
   thread_id: "thread",
   claim_cap: 4,
   target_claim_id: null,
-  model_name: "deepseek/deepseek-v4.1-flash",
+  model_name: "openai/gpt-6-luna",
   status: "completed",
   summary: "4 claims handled: 3 done, 1 left for handler.",
   created_at: "2026-11-05T12:00:00Z",
@@ -216,7 +216,7 @@ it("shows the current run, model, summary and all to-do states", async () => {
   expect(
     await screen.findByText("4 claims handled: 3 done, 1 left for handler."),
   ).toBeDefined();
-  expect(screen.getByText("deepseek/deepseek-v4.1-flash")).toBeDefined();
+  expect(screen.getByText("openai/gpt-6-luna")).toBeDefined();
   expect(screen.getByText("To do", { selector: ".todo-status" })).toBeDefined();
   expect(
     screen.getByText("In progress", { selector: ".todo-status" }),

@@ -18,11 +18,16 @@ class StructuredStub:
         self.result = result
 
     def invoke(self, messages):
-        return self.result
+        return {
+            "raw": AIMessage(content=""),
+            "parsed": self.result,
+            "parsing_error": None,
+        }
 
 
 class StubModel:
     model_name = "stub-model"
+    reasoning_effort = "low"
 
     def __init__(self, replies, result=None):
         self.replies = iter(replies)
@@ -37,7 +42,7 @@ class StubModel:
     def bind_tools(self, tools, **kwargs):
         return self
 
-    def with_structured_output(self, schema):
+    def with_structured_output(self, schema, **kwargs):
         return StructuredStub(self.result)
 
 
@@ -217,7 +222,7 @@ def test_stopped_queue_run_finishes_with_same_plan_and_no_duplicate_work(
     run = client.get(f"/api/runs/{run_id}").json()
     assert run["thread_id"] == "stopped"
     assert run["claim_cap"] == 2
-    assert run["status"] == "completed"
+    assert run["status"] == "completed", (run["summary"], run["todos"])
     assert [todo["status"] for todo in run["todos"]] == ["done", "done"]
     assert [todo["attempts"] for todo in run["todos"]] == [0, 0]
     first = client.get("/api/claims/CLM-1001").json()

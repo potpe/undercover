@@ -54,6 +54,7 @@ claims_table = Table(
     Column("signed_off_by", String),
     Column("paid_amount", Numeric),
     Column("agent_thread_id", String),
+    Column("work_run_id", Integer),
     Column("signed_off_at", DateTime(timezone=True)),
     Column("paid_at", DateTime(timezone=True)),
 )
@@ -122,6 +123,7 @@ runs_table = Table(
     Column("claim_cap", Integer, nullable=False),
     Column("target_claim_id", String),
     Column("model_name", String),
+    Column("reasoning_effort", String),
     Column("status", String, nullable=False),
     Column("summary", Text),
     Column("created_at", DateTime(timezone=True), nullable=False),
@@ -138,6 +140,31 @@ run_todos_table = Table(
     Column("result", Text),
     Column("error", Text),
     UniqueConstraint("run_id", "position"),
+)
+model_calls_table = Table(
+    "model_calls",
+    metadata,
+    Column("id", Integer, primary_key=True, autoincrement=True),
+    Column("claim_id", String, nullable=False),
+    Column("run_id", Integer),
+    Column("model_name", String, nullable=False),
+    Column("reasoning_effort", String),
+    Column("prompt_tokens", Integer, nullable=False),
+    Column("completion_tokens", Integer, nullable=False),
+    Column("total_tokens", Integer, nullable=False),
+    Column("cost", Numeric, nullable=False),
+    Column("created_at", DateTime(timezone=True), nullable=False),
+)
+work_periods_table = Table(
+    "work_periods",
+    metadata,
+    Column("id", Integer, primary_key=True, autoincrement=True),
+    Column("claim_id", String, nullable=False),
+    Column("run_id", Integer),
+    Column("thread_id", String, nullable=False),
+    Column("started_at", DateTime(timezone=True), nullable=False),
+    Column("finished_at", DateTime(timezone=True), nullable=False),
+    Column("seconds", Numeric, nullable=False),
 )
 
 
@@ -195,7 +222,11 @@ def timestamp() -> datetime:
 
 
 def iso(value: Any) -> str | None:
-    return value.isoformat() if value is not None else None
+    if value is None:
+        return None
+    if value.tzinfo is None:
+        value = value.replace(tzinfo=UTC)
+    return value.isoformat()
 
 
 def seed_documents(connection: Connection) -> None:
@@ -294,6 +325,34 @@ def insert_activity(connection: Connection, claim_id: str, message: str) -> None
 def add_activity(claim_id: str, message: str) -> None:
     with connect() as connection:
         insert_activity(connection, claim_id, message)
+
+
+def record_model_call(claim_id: str, values: dict[str, Any]) -> bool:
+    with connect() as connection:
+        exists = connection.execute(
+            select(claims_table.c.claim_id).where(claims_table.c.claim_id == claim_id)
+        ).first()
+        if exists is None:
+            return False
+        connection.execute(
+            insert(model_calls_table).values(
+                claim_id=claim_id, created_at=timestamp(), **values
+            )
+        )
+    return True
+
+
+def record_work_period(claim_id: str, values: dict[str, Any]) -> bool:
+    with connect() as connection:
+        exists = connection.execute(
+            select(claims_table.c.claim_id).where(claims_table.c.claim_id == claim_id)
+        ).first()
+        if exists is None:
+            return False
+        connection.execute(
+            insert(work_periods_table).values(claim_id=claim_id, **values)
+        )
+    return True
 
 
 def list_claims() -> list[dict[str, Any]]:
@@ -407,6 +466,7 @@ def get_claim_bundle(claim_id: str) -> dict[str, Any] | None:
         "signed_off_at": iso(row["signed_off_at"]),
         "paid_at": iso(row["paid_at"]),
         "agent_thread_id": row["agent_thread_id"],
+        "work_run_id": row["work_run_id"],
         "activity": [
             {
                 "id": activity["id"],
