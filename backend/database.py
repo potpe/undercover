@@ -91,6 +91,19 @@ settings_table = Table(
     Column("key", String, primary_key=True),
     Column("data", JSON, nullable=False),
 )
+held_out_claims_table = Table(
+    "held_out_claims",
+    metadata,
+    Column("claim_id", String, primary_key=True),
+    Column("data", JSON, nullable=False),
+)
+handler_decisions_table = Table(
+    "handler_decisions",
+    metadata,
+    Column("evaluation_set", String, primary_key=True),
+    Column("claim_id", String, primary_key=True),
+    Column("data", JSON, nullable=False),
+)
 activity_table = Table(
     "activity",
     metadata,
@@ -292,6 +305,38 @@ def seed_business_data(connection: Connection) -> None:
         connection.execute(insert(settings_table).values(key=key, data=value))
 
 
+def seed_evaluation_data(connection: Connection) -> None:
+    if not connection.execute(
+        select(func.count()).select_from(held_out_claims_table)
+    ).scalar_one():
+        sources = json.loads(
+            (DATA_DIR / "evals" / "held_out_claims.json").read_text(encoding="utf-8")
+        )
+        for claim in sources:
+            connection.execute(
+                insert(held_out_claims_table).values(
+                    claim_id=claim["claim_id"], data=claim
+                )
+            )
+    if connection.execute(
+        select(func.count()).select_from(handler_decisions_table)
+    ).scalar_one():
+        return
+    for evaluation_set, name in (
+        ("evaluation", "decisions.json"),
+        ("held_out", "held_out_decisions.json"),
+    ):
+        labels = json.loads((DATA_DIR / "evals" / name).read_text(encoding="utf-8"))
+        for label in labels:
+            connection.execute(
+                insert(handler_decisions_table).values(
+                    evaluation_set=evaluation_set,
+                    claim_id=label["claim_id"],
+                    data=label,
+                )
+            )
+
+
 def initialize_database() -> None:
     if not os.getenv("DATABASE_URL"):
         database_path().parent.mkdir(parents=True, exist_ok=True)
@@ -302,6 +347,7 @@ def initialize_database() -> None:
         metadata.create_all(connection)
         seed_documents(connection)
         seed_business_data(connection)
+        seed_evaluation_data(connection)
 
 
 def reseed_database() -> None:

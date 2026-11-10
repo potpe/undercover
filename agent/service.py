@@ -11,7 +11,7 @@ from fastapi import BackgroundTasks, FastAPI, HTTPException
 from pydantic import BaseModel
 
 from agent import dispatcher
-from agent.checkpoints import close_checkpoint_pool
+from agent.checkpoints import clear_claim_thread, close_checkpoint_pool
 from agent.main import backend, current_bundle, model_settings
 from agent.main import run_with_context as claim_run
 from backend.models import DispatchRequest, RunRecord
@@ -78,10 +78,13 @@ def work_claim(item: dispatcher.WorkItem) -> dict:
             run_id,
             item["run_kind"],
         )
-        return post_backend(
+        outcome = post_backend(
             f"/api/internal/runs/{run_id}/claims/{claim_id}/complete",
             {"result": result},
         )
+        if item["run_kind"] == "evaluation":
+            clear_claim_thread(context["thread_id"])
+        return outcome
     finally:
         lock.release()
 

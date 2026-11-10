@@ -21,11 +21,17 @@ from backend.database import (
     record_work_period,
     search_document,
 )
+from backend.evaluations import (
+    create_evaluation,
+    evaluation_record,
+    list_evaluations,
+)
 from backend.models import (
     ActivityRequest,
     ClaimBundle,
     ClaimSummary,
     CompleteWorkRequest,
+    CreateEvaluationRequest,
     CreateRunRequest,
     DecisionRequest,
     DispatchRequest,
@@ -33,6 +39,8 @@ from backend.models import (
     DocumentSectionContent,
     DocumentSectionRequest,
     DocumentSectionSummary,
+    EvaluationRecord,
+    EvaluationRequest,
     FailureRequest,
     Instructions,
     ModelCallRequest,
@@ -172,6 +180,46 @@ def get_current_dispatch() -> RunRecord | None:
     """Return the latest dispatch and its record-built progress."""
     run = current_dispatch()
     return RunRecord(**run) if run else None
+
+
+@app.post("/api/evaluations", operation_id="start_evaluation", status_code=202)
+def start_evaluation(request: EvaluationRequest) -> RunRecord:
+    """Ask the agent service to evaluate a labelled set with N agents."""
+    try:
+        response = agent_service.start_evaluation(
+            request.concurrency, request.evaluation_set, request.tiny
+        )
+    except httpx.HTTPError as error:
+        raise service_error(error) from error
+    return RunRecord(**response.json())
+
+
+@app.get("/api/evaluations", operation_id="list_evaluations")
+def get_evaluations() -> list[EvaluationRecord]:
+    """List evaluations newest first with their scoreboard measures."""
+    return [EvaluationRecord(**run) for run in list_evaluations()]
+
+
+@app.get("/api/evaluations/{run_id}", operation_id="get_evaluation")
+def get_evaluation(run_id: int) -> EvaluationRecord:
+    """Return one evaluation's measures and claim comparisons."""
+    return EvaluationRecord(**evaluation_record(run_id))
+
+
+@app.post(
+    "/api/internal/evaluations", operation_id="create_evaluation", status_code=201
+)
+def internal_create_evaluation(request: CreateEvaluationRequest) -> RunRecord:
+    """Create an evaluation and its isolated claim copies for the service."""
+    return RunRecord(
+        **create_evaluation(
+            request.concurrency,
+            request.evaluation_set,
+            request.tiny,
+            request.model_name,
+            request.reasoning_effort,
+        )
+    )
 
 
 @app.post("/api/internal/dispatches", operation_id="create_dispatch", status_code=201)

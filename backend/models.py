@@ -1,3 +1,4 @@
+from collections.abc import Sequence
 from datetime import datetime
 from typing import Any, Literal
 
@@ -165,13 +166,52 @@ class RunRecord(BaseModel):
     created_at: str
     completed_at: str | None
     stopped_at: str | None
-    claims: list[RunClaim]
+    claims: Sequence[RunClaim]
     model_cost: float
     prompt_tokens: int
     completion_tokens: int
     total_tokens: int
     active_seconds: float
     wall_seconds: float
+
+
+class EvaluationRequest(DispatchRequest):
+    evaluation_set: Literal["evaluation", "held_out"]
+    tiny: bool
+
+
+class CreateEvaluationRequest(CreateRunRequest):
+    evaluation_set: Literal["evaluation", "held_out"]
+    tiny: bool
+
+
+class EvaluationMeasures(BaseModel):
+    decision_accuracy: float
+    accuracy: float
+    cost_of_mistakes: float
+    straight_through: float
+    model_cost: float
+    model_cost_per_claim: float
+    seconds_per_claim: float
+    slowest_claim: float
+    seconds: float
+
+
+class EvaluationClaim(RunClaim):
+    source_claim_id: str
+    handler_decision: DecisionKind
+    handler_payout: float
+    agent_decision: DecisionKind
+    agent_payout: float
+    agent_reason: str
+    decision_match: bool
+    right: bool
+    mistake_cost: float
+
+
+class EvaluationRecord(RunRecord):
+    measures: EvaluationMeasures
+    claim_comparisons: Sequence[EvaluationClaim]
 
 
 class StoppedRuns(BaseModel):

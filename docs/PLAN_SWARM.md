@@ -182,15 +182,15 @@ Seed the source/answer-key tables, create fresh copies, run them through the sam
 
 ### Success criteria
 
-- [ ] Seed tests find 25 source claims and 25 labels in each set, exactly five `tiny` labels in each, while `GET /api/claims` still returns only the 25 operational claims. Reseeding empties all evaluations, copies, ledgers and checkpoints and drops obsolete to-dos.
-- [ ] Evaluation creation tests cover both labelled sets, whole/tiny selection, required N/set/scope, new ids written into both primary key and JSON, internal source mapping, model/reasoning, and no mutation of source/queue records.
-- [ ] The agent service never requests handler decisions, and no claim/agent tool or prompt contains answer-key content. `get_claim` on a copy returns its full business bundle but no handler decision/payout/reason/tags; only the evaluation detail operation exposes the side-by-side comparison.
-- [ ] A stub-model evaluation uses the same dispatcher and claim graph, leaves queue counts/statuses byte-for-byte unchanged, and a later operational dispatch never selects its copies. Cost/time rows belong only to that evaluation.
-- [ ] An over-limit evaluation approval remains unpaid, counts as finished, and has its saved claim thread cleared. Its page has no sign-off form, and direct sign-off on the copy returns 409 without changing it. Completed non-held copies also have no resumable evaluation checkpoint.
-- [ ] Startup marks a partially worked evaluation `stopped`; scoreboard reads identify that state and treat every undecided selected copy as a zero-payout referral.
-- [ ] A hand-worked scoring fixture covers a correct approval, wrong amount within/over $1, wrongful decline, wrongful approval whether paid or held, needless referral, correct decline/referral and an undecided copy. API results exactly match independently calculated decision accuracy, accuracy, mistake cost, straight-through rate, total/per-claim model cost, average/slowest active seconds and whole-run seconds.
-- [ ] Evaluation list/detail responses are newest first, typed and complete with per-claim handler/agent decisions and payouts, agent reason, cost/time and miss indicators. All new operations satisfy the OpenAPI rules.
-- [ ] `npm run check:python` passes all evaluation tests on isolated SQLite/stubs with at least 80% coverage and no network/model calls.
+- [x] Seed tests find 25 source claims and 25 labels in each set, exactly five `tiny` labels in each, while `GET /api/claims` still returns only the 25 operational claims. Reseeding empties all evaluations, copies, ledgers and checkpoints and drops obsolete to-dos.
+- [x] Evaluation creation tests cover both labelled sets, whole/tiny selection, required N/set/scope, new ids written into both primary key and JSON, internal source mapping, model/reasoning, and no mutation of source/queue records.
+- [x] The agent service never requests handler decisions, and no claim/agent tool or prompt contains answer-key content. `get_claim` on a copy returns its full business bundle but no handler decision/payout/reason/tags; only the evaluation detail operation exposes the side-by-side comparison.
+- [x] A stub-model evaluation uses the same dispatcher and claim graph, leaves queue counts/statuses byte-for-byte unchanged, and a later operational dispatch never selects its copies. Cost/time rows belong only to that evaluation.
+- [x] An over-limit evaluation approval remains unpaid, counts as finished, and has its saved claim thread cleared. Its page has no sign-off form, and direct sign-off on the copy returns 409 without changing it. Completed non-held copies also have no resumable evaluation checkpoint.
+- [x] Startup marks a partially worked evaluation `stopped`; scoreboard reads identify that state and treat every undecided selected copy as a zero-payout referral.
+- [x] A hand-worked scoring fixture covers a correct approval, wrong amount within/over $1, wrongful decline, wrongful approval whether paid or held, needless referral, correct decline/referral and an undecided copy. API results exactly match independently calculated decision accuracy, accuracy, mistake cost, straight-through rate, total/per-claim model cost, average/slowest active seconds and whole-run seconds.
+- [x] Evaluation list/detail responses are newest first, typed and complete with per-claim handler/agent decisions and payouts, agent reason, cost/time and miss indicators. All new operations satisfy the OpenAPI rules.
+- [x] `npm run check:python` passes all evaluation tests on isolated SQLite/stubs with at least 80% coverage and no network/model calls.
 
 ## Phase 5: Scoreboard, end-to-end coverage and documentation
 

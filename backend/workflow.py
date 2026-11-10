@@ -103,6 +103,8 @@ def record_decision(claim_id: str, request: DecisionRequest) -> None:
 def sign_off(claim_id: str, request: SignOffRequest) -> None:
     with connect() as connection:
         row = claim_row(connection, claim_id)
+        if row["evaluation_run_id"] is not None:
+            reject(connection, claim_id, "Evaluation claims cannot be signed off")
         handler = connection.execute(
             select(handlers_table.c.data).where(
                 handlers_table.c.handler_id == request.handler_id
