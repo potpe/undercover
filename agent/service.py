@@ -2,6 +2,7 @@
 
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager, suppress
+from threading import Thread
 from typing import Literal
 
 import httpx
@@ -86,9 +87,16 @@ def run_stored_run(run_id: int) -> str:
 
 @asynccontextmanager
 async def lifespan(_: FastAPI) -> AsyncIterator[None]:
-    with suppress(httpx.HTTPError):
-        recover_work()
-    yield
+    def recover() -> None:
+        with suppress(httpx.HTTPError):
+            recover_work()
+
+    recovery = Thread(target=recover)
+    recovery.start()
+    try:
+        yield
+    finally:
+        recovery.join()
 
 
 app = FastAPI(title="UnderCover Agent", lifespan=lifespan)
