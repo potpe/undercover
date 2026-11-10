@@ -325,6 +325,7 @@ def test_model_name(monkeypatch):
     monkeypatch.delenv("MODEL_NAME", raising=False)
     assert main.model().model_name == "deepseek/deepseek-v4.1-flash"
     assert main.model().reasoning_effort == "low"
+    assert main.model().model_dump()["max_tokens"] == 4096
     monkeypatch.setenv("MODEL_NAME", "openrouter/free")
     assert main.model().model_name == "openrouter/free"
     assert main.model().reasoning_effort is None

@@ -150,6 +150,7 @@ def model() -> ChatOpenAI:
         api_key=SecretStr(os.environ["OPENROUTER_API_KEY"]),
         reasoning_effort=None if name else "low",
         timeout=60,
+        max_completion_tokens=4096,
     )
 
 
