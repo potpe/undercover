@@ -72,8 +72,8 @@ def test_postgres_engine_uses_schema_and_bounded_pool(monkeypatch):
     url, kwargs = calls[0]
     assert url.startswith("postgresql+psycopg://")
     assert kwargs["connect_args"] == {"options": "-c search_path=undercover"}
-    assert kwargs["pool_size"] == 2
-    assert kwargs["max_overflow"] == 2
+    assert kwargs["pool_size"] == 1
+    assert kwargs["max_overflow"] == 1
 
 
 def test_sqlite_engine_needs_no_postgres_connection(tmp_path):

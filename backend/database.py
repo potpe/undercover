@@ -210,8 +210,8 @@ def create_db_engine(url: str) -> Engine:
         return create_engine(
             url,
             connect_args={"options": f"-c search_path={SCHEMA}"},
-            pool_size=2,
-            max_overflow=2,
+            pool_size=1,
+            max_overflow=1,
         )
     return create_engine(url)
 
