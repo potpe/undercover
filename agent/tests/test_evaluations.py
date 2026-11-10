@@ -5,6 +5,7 @@ from langchain_core.messages import AIMessage
 from agent import dispatcher, main, service
 from backend import main as backend_main
 from backend.models import DecisionRequest
+from backend.workflow import record_decision
 
 
 class StructuredStub:
@@ -82,3 +83,55 @@ def test_evaluation_uses_claim_graph_without_changing_queue_or_retaining_progres
                 {"configurable": {"thread_id": bundle["agent_thread_id"]}}
             )
         assert saved is None
+
+
+def test_terminal_evaluation_error_also_clears_saved_progress(client, monkeypatch):
+    monkeypatch.setattr(main, "backend", lambda: TestClient(backend_main.app))
+    monkeypatch.setattr(service, "backend", lambda: TestClient(backend_main.app))
+    monkeypatch.setattr(dispatcher, "backend", lambda: TestClient(backend_main.app))
+    created = client.post(
+        "/api/internal/evaluations",
+        json={
+            "concurrency": 5,
+            "model_name": "openai/gpt-6-luna",
+            "reasoning_effort": "low",
+            "evaluation_set": "evaluation",
+            "tiny": True,
+        },
+    )
+    run_id = created.json()["run_id"]
+    detail = client.get(f"/api/evaluations/{run_id}").json()
+    first_copy = detail["claim_comparisons"][0]["claim_id"]
+    cleared = []
+    monkeypatch.setattr(service, "clear_claim_thread", cleared.append)
+
+    def error_after_held(claim_id, thread_id, run_id, run_kind):
+        if claim_id == first_copy:
+            record_decision(
+                claim_id,
+                DecisionRequest(
+                    decision="approve",
+                    payout=3750,
+                    reason="The held decision was saved before the response was lost.",
+                    policy_section="Section 7: Emergency Medical; Section 10: Payment",
+                ),
+            )
+            raise RuntimeError("Response lost after the held decision")
+        record_decision(
+            claim_id,
+            DecisionRequest(
+                decision="decline",
+                payout=0,
+                reason="The policy wording excludes this loss.",
+                policy_section="Section 9: General exclusions",
+            ),
+        )
+        return f"{claim_id}: decline $0.00"
+
+    monkeypatch.setattr(service, "claim_run", error_after_held)
+    assert service.execute_stored_run(run_id) == "completed"
+
+    bundle = client.get(f"/api/claims/{first_copy}").json()
+    assert bundle["claim"]["status"] == "waiting_for_sign_off"
+    assert bundle["failed_attempts"] == 0
+    assert bundle["agent_thread_id"] in cleared

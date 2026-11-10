@@ -3,7 +3,7 @@
 import time
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
-from threading import Lock, Thread
+from threading import Lock
 from typing import Literal
 
 import httpx
@@ -58,6 +58,11 @@ def run_claim_locked(
         return claim_run(claim_id, thread_id, run_id, run_kind)
 
 
+def clear_evaluation_progress(item: dispatcher.WorkItem, thread_id: str | None) -> None:
+    if item["run_kind"] == "evaluation" and thread_id:
+        clear_claim_thread(thread_id)
+
+
 def work_claim(item: dispatcher.WorkItem) -> dict:
     """Begin, run and settle one claim; transient model errors escape unchanged."""
     claim_id = item["claim_id"]
@@ -71,6 +76,7 @@ def work_claim(item: dispatcher.WorkItem) -> dict:
     try:
         context = post_backend(f"/api/internal/runs/{run_id}/claims/{claim_id}/begin")
         if context["status"] in ("done", "left_for_handler"):
+            clear_evaluation_progress(item, context["thread_id"])
             return context
         result = claim_run(
             claim_id,
@@ -82,8 +88,7 @@ def work_claim(item: dispatcher.WorkItem) -> dict:
             f"/api/internal/runs/{run_id}/claims/{claim_id}/complete",
             {"result": result},
         )
-        if item["run_kind"] == "evaluation":
-            clear_claim_thread(context["thread_id"])
+        clear_evaluation_progress(item, context["thread_id"])
         return outcome
     finally:
         lock.release()
@@ -99,10 +104,13 @@ def handle_work_error(item: dispatcher.WorkItem, error: Exception) -> dict:
         )
         else "fail"
     )
-    return post_backend(
+    outcome = post_backend(
         f"/api/internal/runs/{run_id}/claims/{claim_id}/{operation}",
         {"error": str(error) or error.__class__.__name__},
     )
+    if outcome["status"] in ("done", "left_for_handler"):
+        clear_evaluation_progress(item, current_bundle(claim_id)["agent_thread_id"])
+    return outcome
 
 
 def report_failure(claim_id: str, error: str) -> None:
@@ -193,21 +201,16 @@ def create_run(
 
 @asynccontextmanager
 async def lifespan(_: FastAPI) -> AsyncIterator[None]:
-    def recover() -> None:
-        for attempt in range(STARTUP_ATTEMPTS):
-            try:
-                recover_work()
-                return
-            except httpx.HTTPError:
-                if attempt + 1 < STARTUP_ATTEMPTS:
-                    time.sleep(0.5)
-
-    recovery = Thread(target=recover)
-    recovery.start()
+    for attempt in range(STARTUP_ATTEMPTS):
+        try:
+            recover_work()
+            break
+        except httpx.HTTPError:
+            if attempt + 1 < STARTUP_ATTEMPTS:
+                time.sleep(0.5)
     try:
         yield
     finally:
-        recovery.join()
         close_checkpoint_pool()
 
 

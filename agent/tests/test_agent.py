@@ -1,7 +1,9 @@
 from datetime import UTC, datetime
 from types import SimpleNamespace
 
+import pytest
 from fastapi.testclient import TestClient
+from langchain_core.exceptions import ModelRateLimitError
 from langchain_core.messages import AIMessage
 
 from agent import main
@@ -303,6 +305,9 @@ def test_signoff_at_new_interrupt_resumes_payment_in_the_same_run(client, monkey
                 values={"result": "waiting"},
             )
 
+        def update_state(self, config, values):
+            return None
+
         def invoke(self, inputs, config, durability):
             calls.append(inputs)
             if len(calls) == 1:
@@ -394,6 +399,54 @@ def test_each_claim_thread_has_only_its_own_message(client, monkeypatch):
     assert first_messages[0].content == "Work claim CLM-1001"
     assert second_messages[0].content == "Work claim CLM-1002"
     assert all("CLM-1002" not in message.content for message in first_messages)
+
+
+def test_resumed_model_usage_belongs_to_the_current_run(client, monkeypatch):
+    use_backend(monkeypatch)
+
+    class InterruptibleStub(StubModel):
+        def invoke(self, messages):
+            reply = next(self.messages)
+            if isinstance(reply, BaseException):
+                raise reply
+            return reply
+
+    first_reply = tool_call("read", "read_claim", {"claim_id": "CLM-1001"})
+    first_reply.response_metadata["token_usage"] = {
+        "prompt_tokens": 10,
+        "completion_tokens": 2,
+        "total_tokens": 12,
+        "cost": 0.01,
+    }
+    monkeypatch.setattr(
+        main,
+        "model",
+        lambda: InterruptibleStub(
+            messages=iter([first_reply, ModelRateLimitError("429")])
+        ),
+    )
+    with pytest.raises(ModelRateLimitError):
+        main.run_with_context("CLM-1001", "resume-usage", 1, "dispatch")
+
+    final_reply = AIMessage(content="The claim is covered")
+    final_reply.response_metadata["token_usage"] = {
+        "prompt_tokens": 20,
+        "completion_tokens": 3,
+        "total_tokens": 23,
+        "cost": 0.02,
+    }
+    monkeypatch.setattr(
+        main,
+        "model",
+        lambda: StubModel(
+            messages=iter([final_reply]), structured_decision=decision(420)
+        ),
+    )
+    result = main.run_with_context("CLM-1001", "resume-usage", 2, "dispatch")
+
+    assert result == "CLM-1001: approve $420.00; payment recorded"
+    assert run_usage(1)["model_cost"] == 0.01
+    assert run_usage(2)["model_cost"] == 0.025
 
 
 def test_model_name(monkeypatch):

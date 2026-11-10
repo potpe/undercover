@@ -55,4 +55,4 @@ This runs Ruff, Pyright, pytest with at least 80% coverage, Prettier, ESLint, ts
 
 ## Verification
 
-Final offline gate: with `.env` absent, `npm run check` passed 99 Python tests at 93.25% coverage, 28 Vitest tests at 90.14% statement coverage and ten Playwright tests without hosted/model calls. Playwright MCP review found no console errors or horizontal overflow at desktop/mobile sizes across dispatch, Scoreboard, evaluation copy and instructions. The one-seed Luna/Supabase/Langfuse verification remains to be recorded.
+Final offline gate: with `.env` absent, `npm run check` passed 102 Python tests at 93.49% coverage, 28 Vitest tests at 90.14% statement coverage and ten Playwright tests without hosted/model calls. Additional regressions cover atomic pool initialization, named-thread persistence, current-run usage after resume, startup cleanup ordering and terminal evaluation cleanup. Playwright MCP review found no console errors or horizontal overflow at desktop/mobile sizes across dispatch, Scoreboard, evaluation copy and instructions. The one-seed Luna/Supabase/Langfuse verification remains to be recorded.

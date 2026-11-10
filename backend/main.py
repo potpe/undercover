@@ -158,7 +158,7 @@ def run_claim(
     claim_id: str, request: RunRequest, background_tasks: BackgroundTasks
 ) -> RunResponse:
     """Work one named claim without creating a dispatch or evaluation."""
-    start_run(claim_id)
+    start_run(claim_id, request.thread_id)
     background_tasks.add_task(
         agent_service.work_named_claim, claim_id, request.thread_id
     )

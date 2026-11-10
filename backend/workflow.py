@@ -176,7 +176,7 @@ def record_payment(claim_id: str, request: PaymentRequest) -> None:
         )
 
 
-def start_run(claim_id: str) -> None:
+def start_run(claim_id: str, thread_id: str | None = None) -> None:
     with connect() as connection:
         row = claim_row(connection, claim_id)
         if row["status"] != "waiting":
@@ -184,7 +184,11 @@ def start_run(claim_id: str) -> None:
         connection.execute(
             update(claims_table)
             .where(claims_table.c.claim_id == claim_id)
-            .values(status="in_progress")
+            .values(
+                status="in_progress",
+                agent_thread_id=thread_id,
+                work_run_id=None,
+            )
         )
         insert_activity(connection, claim_id, "Agent run started")
 

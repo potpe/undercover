@@ -1,3 +1,6 @@
+import time
+from concurrent.futures import ThreadPoolExecutor
+
 from agent import checkpoints
 
 
@@ -35,7 +38,7 @@ def test_postgres_uses_one_bounded_pool_and_a_new_saver_per_claim(monkeypatch):
     monkeypatch.setenv("DATABASE_URL", "postgresql://postgres@localhost/postgres")
     monkeypatch.setattr(checkpoints, "ConnectionPool", FakePool)
     monkeypatch.setattr(checkpoints, "PostgresSaver", FakeSaver)
-    checkpoints.postgres_pool.cache_clear()
+    checkpoints.cached_postgres_pool.cache_clear()
 
     with checkpoints.claim_checkpointer() as first:
         pass
@@ -59,3 +62,36 @@ def test_postgres_uses_one_bounded_pool_and_a_new_saver_per_claim(monkeypatch):
 
     checkpoints.close_checkpoint_pool()
     assert first_pool.closed is True
+
+
+def test_concurrent_claims_initialize_only_one_pool(monkeypatch):
+    creations = []
+
+    class FakePool:
+        def __init__(self, url, **kwargs):
+            time.sleep(0.01)
+            creations.append(url)
+
+        def close(self):
+            pass
+
+    class FakeSaver:
+        def __init__(self, pool):
+            self.pool = pool
+
+        def setup(self):
+            pass
+
+    monkeypatch.setenv("DATABASE_URL", "postgresql://postgres@localhost/postgres")
+    monkeypatch.setattr(checkpoints, "ConnectionPool", FakePool)
+    monkeypatch.setattr(checkpoints, "PostgresSaver", FakeSaver)
+    checkpoints.cached_postgres_pool.cache_clear()
+
+    def enter_checkpoint(_):
+        with checkpoints.claim_checkpointer():
+            pass
+
+    with ThreadPoolExecutor(max_workers=3) as pool:
+        list(pool.map(enter_checkpoint, range(3)))
+
+    assert creations == ["postgresql://postgres@localhost/postgres"]

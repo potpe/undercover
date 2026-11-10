@@ -401,6 +401,8 @@ def run_with_context(
                 "run_id": run_id,
                 "run_kind": run_kind,
             }
+        if saved.created_at is not None:
+            graph.update_state(config, {"run_id": run_id, "run_kind": run_kind})
         started_at = utcnow()
         started = perf_counter()
         try:

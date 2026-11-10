@@ -5,6 +5,7 @@ import sqlite3
 from collections.abc import Iterator
 from contextlib import contextmanager
 from functools import lru_cache
+from threading import Lock
 from typing import Any, cast
 
 from langgraph.checkpoint.base import BaseCheckpointSaver
@@ -16,9 +17,11 @@ from psycopg_pool import ConnectionPool
 
 from backend.database import database_path
 
+POOL_INIT_LOCK = Lock()
+
 
 @lru_cache
-def postgres_pool(database_url: str) -> ConnectionPool[Connection[DictRow]]:
+def cached_postgres_pool(database_url: str) -> ConnectionPool[Connection[DictRow]]:
     pool = cast(
         Any,
         ConnectionPool(
@@ -35,6 +38,11 @@ def postgres_pool(database_url: str) -> ConnectionPool[Connection[DictRow]]:
     )
     PostgresSaver(pool).setup()
     return pool
+
+
+def postgres_pool(database_url: str) -> ConnectionPool[Connection[DictRow]]:
+    with POOL_INIT_LOCK:
+        return cached_postgres_pool(database_url)
 
 
 @contextmanager
@@ -59,7 +67,7 @@ def close_checkpoint_pool() -> None:
     database_url = os.getenv("DATABASE_URL")
     if database_url:
         postgres_pool(database_url).close()
-        postgres_pool.cache_clear()
+        cached_postgres_pool.cache_clear()
 
 
 def clear_claim_thread(thread_id: str) -> None:
