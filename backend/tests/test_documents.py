@@ -87,13 +87,12 @@ def test_document_operations_reject_bad_input_and_unknown_claims(client):
     assert unknown_claim.status_code == 404
 
 
-def test_instructions_are_split_by_agent_role(client):
+def test_instructions_contain_only_the_claim_agent_role(client):
     response = client.get("/api/agent/instructions")
 
     assert response.status_code == 200
     instructions = response.json()
-    assert set(instructions) == {"queue", "claim"}
-    assert "to-do" in instructions["queue"]
+    assert set(instructions) == {"claim"}
     assert "policy wording" in instructions["claim"]
     assert "claims manual" in instructions["claim"]
     assert "third claim" in instructions["claim"]

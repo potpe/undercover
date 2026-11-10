@@ -1,4 +1,4 @@
-"""The UnderCover Agent's separate web service."""
+"""The UnderCover Agent's separate web service and claim-work harness."""
 
 import time
 from collections.abc import AsyncIterator
@@ -7,44 +7,103 @@ from threading import Lock, Thread
 from typing import Literal
 
 import httpx
-from fastapi import BackgroundTasks, FastAPI
+from fastapi import BackgroundTasks, FastAPI, HTTPException
 from pydantic import BaseModel
 
-from agent.main import backend, current_bundle
+from agent import dispatcher
+from agent.checkpoints import close_checkpoint_pool
+from agent.main import backend, current_bundle, model_settings
 from agent.main import run_with_context as claim_run
-from agent.queue import run as queue_run
-from backend.runs import fail_queue_run
+from backend.models import DispatchRequest, RunRecord
 
 STARTUP_ATTEMPTS = 10
 _claim_locks: dict[str, Lock] = {}
-_run_locks: dict[int, Lock] = {}
+_run_slot = Lock()
 
 
 class ClaimWorkRequest(BaseModel):
     thread_id: str
     run_id: int | None
+    run_kind: Literal["dispatch", "evaluation"]
 
 
 class ClaimWorkResponse(BaseModel):
     result: str
 
 
+class EvaluationRequest(DispatchRequest):
+    evaluation_set: Literal["evaluation", "held_out"]
+    tiny: bool
+
+
 class AcceptedResponse(BaseModel):
     status: Literal["accepted"]
 
 
-def run_claim_locked(claim_id: str, thread_id: str, run_id: int | None = None) -> str:
+def post_backend(path: str, body=None) -> dict:
+    with backend() as client:
+        response = client.post(path, json=body)
+    response.raise_for_status()
+    return response.json()
+
+
+def run_claim_locked(
+    claim_id: str,
+    thread_id: str,
+    run_id: int | None = None,
+    run_kind: str = "dispatch",
+) -> str:
     lock = _claim_locks.setdefault(claim_id, Lock())
     with lock:
-        if run_id is None:
-            return claim_run(claim_id, thread_id)
-        return claim_run(claim_id, thread_id, run_id=run_id)
+        return claim_run(claim_id, thread_id, run_id, run_kind)
+
+
+def work_claim(item: dispatcher.WorkItem) -> dict:
+    """Begin, run and settle one claim; transient model errors escape unchanged."""
+    claim_id = item["claim_id"]
+    run_id = item["run_id"]
+    lock = _claim_locks.setdefault(claim_id, Lock())
+    if not lock.acquire(blocking=False):
+        return post_backend(
+            f"/api/internal/runs/{run_id}/claims/{claim_id}/leave",
+            {"error": "Claim is already resuming after sign-off"},
+        )
+    try:
+        context = post_backend(f"/api/internal/runs/{run_id}/claims/{claim_id}/begin")
+        if context["status"] in ("done", "left_for_handler"):
+            return context
+        result = claim_run(
+            claim_id,
+            context["thread_id"],
+            run_id,
+            item["run_kind"],
+        )
+        return post_backend(
+            f"/api/internal/runs/{run_id}/claims/{claim_id}/complete",
+            {"result": result},
+        )
+    finally:
+        lock.release()
+
+
+def handle_work_error(item: dispatcher.WorkItem, error: Exception) -> dict:
+    claim_id = item["claim_id"]
+    run_id = item["run_id"]
+    operation = (
+        "leave"
+        if isinstance(
+            error, (dispatcher.ModelRateLimitError, dispatcher.ModelTimeoutError)
+        )
+        else "fail"
+    )
+    return post_backend(
+        f"/api/internal/runs/{run_id}/claims/{claim_id}/{operation}",
+        {"error": str(error) or error.__class__.__name__},
+    )
 
 
 def report_failure(claim_id: str, error: str) -> None:
-    with backend() as client:
-        response = client.post(f"/api/claims/{claim_id}/failure", json={"error": error})
-    response.raise_for_status()
+    post_backend(f"/api/claims/{claim_id}/failure", {"error": error})
 
 
 def resume_claim(claim_id: str) -> str:
@@ -78,40 +137,55 @@ def recover_signed_off_claims() -> None:
 
 
 def recover_work() -> None:
+    post_backend("/api/internal/runs/stop-active")
     recover_signed_off_claims()
-    with backend() as client:
-        response = client.get("/api/runs/current")
-    response.raise_for_status()
-    run = response.json()
-    if run and run["status"] == "in_progress":
-        run_stored_run(run["run_id"])
 
 
 def execute_stored_run(run_id: int) -> str:
-    recover_signed_off_claims()
     with backend() as client:
-        response = client.get(f"/api/runs/{run_id}")
+        response = client.get(f"/api/internal/runs/{run_id}")
     response.raise_for_status()
     run = response.json()
     if run["status"] != "in_progress":
-        return run["summary"] or run["status"]
+        return run["status"]
     try:
-        result = queue_run(run_id, run["thread_id"])
-        with backend() as client:
-            current = client.get(f"/api/runs/{run_id}")
-        current.raise_for_status()
-        if current.json()["status"] == "in_progress":
-            raise RuntimeError("Queue agent finished without completing the run")
-        return result
+        dispatcher.run_dispatch(
+            run_id=run_id,
+            run_kind=run["kind"],
+            concurrency=run["concurrency"],
+            harness=dispatcher.Harness(work=work_claim, on_error=handle_work_error),
+        )
+        finished = post_backend(f"/api/internal/runs/{run_id}/finish")
+        return finished["status"]
     except Exception as error:
-        fail_queue_run(run_id, str(error))
+        post_backend(f"/api/internal/runs/{run_id}/stop", {"error": str(error)})
         return str(error)
 
 
-def run_stored_run(run_id: int) -> str:
-    lock = _run_locks.setdefault(run_id, Lock())
-    with lock:
-        return execute_stored_run(run_id)
+def run_in_background(run_id: int) -> None:
+    try:
+        execute_stored_run(run_id)
+    finally:
+        _run_slot.release()
+
+
+def create_run(
+    path: str, request: BaseModel, background_tasks: BackgroundTasks
+) -> dict:
+    if not _run_slot.acquire(blocking=False):
+        raise HTTPException(
+            status_code=409, detail="Another dispatch or evaluation is running"
+        )
+    try:
+        model_name, reasoning_effort = model_settings()
+        payload = request.model_dump()
+        payload.update(model_name=model_name, reasoning_effort=reasoning_effort)
+        run = post_backend(path, payload)
+        background_tasks.add_task(run_in_background, run["run_id"])
+        return run
+    except Exception:
+        _run_slot.release()
+        raise
 
 
 @asynccontextmanager
@@ -131,9 +205,30 @@ async def lifespan(_: FastAPI) -> AsyncIterator[None]:
         yield
     finally:
         recovery.join()
+        close_checkpoint_pool()
 
 
 app = FastAPI(title="UnderCover Agent", lifespan=lifespan)
+
+
+@app.post("/dispatches", operation_id="dispatch_claims", status_code=202)
+def start_dispatch(
+    request: DispatchRequest, background_tasks: BackgroundTasks
+) -> RunRecord:
+    """Create and start a dispatch in the background with N agents."""
+    return RunRecord(
+        **create_run("/api/internal/dispatches", request, background_tasks)
+    )
+
+
+@app.post("/evaluations", operation_id="evaluate_claims", status_code=202)
+def start_evaluation(
+    request: EvaluationRequest, background_tasks: BackgroundTasks
+) -> RunRecord:
+    """Create and start an evaluation in the background with N agents."""
+    return RunRecord(
+        **create_run("/api/internal/evaluations", request, background_tasks)
+    )
 
 
 @app.get("/health", operation_id="agent_health")
@@ -144,9 +239,11 @@ def health() -> dict[str, str]:
 
 @app.post("/claims/{claim_id}/work", operation_id="work_claim")
 def work(claim_id: str, request: ClaimWorkRequest) -> ClaimWorkResponse:
-    """Work one claim on its supplied durable thread."""
+    """Work one named claim on its durable thread without a run."""
     return ClaimWorkResponse(
-        result=run_claim_locked(claim_id, request.thread_id, request.run_id)
+        result=run_claim_locked(
+            claim_id, request.thread_id, request.run_id, request.run_kind
+        )
     )
 
 
@@ -154,11 +251,4 @@ def work(claim_id: str, request: ClaimWorkRequest) -> ClaimWorkResponse:
 def resume(claim_id: str, background_tasks: BackgroundTasks) -> AcceptedResponse:
     """Resume a signed-off claim in the background."""
     background_tasks.add_task(resume_claim, claim_id)
-    return AcceptedResponse(status="accepted")
-
-
-@app.post("/runs/{run_id}", operation_id="run_queue", status_code=202)
-def run(run_id: int, background_tasks: BackgroundTasks) -> AcceptedResponse:
-    """Run or recover a stored queue run in the background."""
-    background_tasks.add_task(run_stored_run, run_id)
     return AcceptedResponse(status="accepted")

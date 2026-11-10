@@ -1,7 +1,7 @@
 import inspect
 
 from agent.main import run
-from backend import main
+from backend import agent_service
 from backend.workflow import start_run
 
 
@@ -9,6 +9,7 @@ def test_agent_instructions_are_served_read_only(client):
     response = client.get("/api/agent/instructions")
 
     assert response.status_code == 200
+    assert set(response.json()) == {"claim"}
     instructions = response.json()["claim"]
     assert instructions.startswith("You are the UnderCover claim agent.")
     assert "two or three sentences" in instructions
@@ -16,23 +17,22 @@ def test_agent_instructions_are_served_read_only(client):
     assert "openai/gpt-6-luna" not in instructions
 
 
-def test_named_run_schedules_the_queue_agent(client, monkeypatch):
+def test_named_run_schedules_only_that_claim(client, monkeypatch):
     calls = []
 
-    def schedule_spy(run_id):
-        calls.append(run_id)
+    def schedule_spy(claim_id, thread_id):
+        calls.append((claim_id, thread_id))
 
-    monkeypatch.setattr(main, "notify_agent_run", schedule_spy)
+    monkeypatch.setattr(agent_service, "work_named_claim", schedule_spy)
 
     response = client.post("/api/claims/CLM-1001/run", json={"thread_id": "thread-api"})
 
     assert response.status_code == 202
-    assert response.json()["claim_id"] == "CLM-1001"
-    assert response.json()["status"] == "in_progress"
-    assert calls == [response.json()["run_id"]]
+    assert response.json() == {"claim_id": "CLM-1001", "status": "in_progress"}
+    assert calls == [("CLM-1001", "thread-api")]
 
 
-def test_duplicate_run_is_rejected_while_in_progress(client):
+def test_duplicate_named_run_is_rejected_while_in_progress(client):
     start_run("CLM-1001")
 
     second = client.post("/api/claims/CLM-1001/run", json={"thread_id": "two"})

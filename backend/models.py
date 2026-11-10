@@ -85,27 +85,21 @@ class RunRequest(BaseModel):
 
 
 class RunResponse(BaseModel):
-    run_id: int
     claim_id: str
     status: Literal["in_progress"]
 
 
-class QueueRunRequest(BaseModel):
-    thread_id: str = Field(min_length=1)
-    claim_cap: int = Field(ge=1, le=25)
+class DispatchRequest(BaseModel):
+    concurrency: int = Field(ge=1, le=25)
 
 
-class RunPlanRequest(BaseModel):
-    claim_ids: list[str] = Field(min_length=1)
+class CreateRunRequest(DispatchRequest):
     model_name: str = Field(min_length=1)
+    reasoning_effort: str | None
 
 
-class FinishRunRequest(BaseModel):
-    summary: str = Field(min_length=1)
-
-
-class WorkRequest(BaseModel):
-    claim_id: str = Field(min_length=1)
+class CompleteWorkRequest(BaseModel):
+    result: str = Field(min_length=1)
 
 
 class FailureRequest(BaseModel):
@@ -120,27 +114,68 @@ class WorkOutcome(BaseModel):
     result: str
 
 
-class RunTodo(BaseModel):
+class WorkContext(BaseModel):
+    run_id: int
     claim_id: str
-    position: int
-    status: Literal["to_do", "in_progress", "done", "left_for_handler"]
+    run_kind: Literal["dispatch", "evaluation"]
+    thread_id: str | None
+    status: Literal["in_progress", "done", "left_for_handler"]
     attempts: int
     result: str | None
+
+
+class HeldPayout(BaseModel):
+    claim_id: str
+    payout: float
+
+
+class DispatchSummary(BaseModel):
+    approved: int
+    declined: int
+    referred: int
+    waiting_for_sign_off: list[HeldPayout]
+    left_for_handler: list[str]
+    in_progress: list[str]
     error: str | None
 
 
-class AgentRun(BaseModel):
+class RunClaim(BaseModel):
+    claim_id: str
+    position: int
+    status: Literal["waiting", "in_progress", "done", "left_for_handler"]
+    attempts: int
+    result: str | None
+    error: str | None
+    started_at: str | None
+    finished_at: str | None
+    model_cost: float
+    active_seconds: float
+
+
+class RunRecord(BaseModel):
     run_id: int
-    thread_id: str
-    claim_cap: int
-    target_claim_id: str | None
-    model_name: str | None
+    kind: Literal["dispatch", "evaluation"]
+    concurrency: int
+    status: Literal["in_progress", "completed", "stopped"]
+    model_name: str
     reasoning_effort: str | None
-    status: Literal["in_progress", "completed", "failed"]
-    summary: str | None
+    evaluation_set: str | None
+    tiny: bool | None
+    summary: DispatchSummary | None
     created_at: str
     completed_at: str | None
-    todos: list[RunTodo]
+    stopped_at: str | None
+    claims: list[RunClaim]
+    model_cost: float
+    prompt_tokens: int
+    completion_tokens: int
+    total_tokens: int
+    active_seconds: float
+    wall_seconds: float
+
+
+class StoppedRuns(BaseModel):
+    stopped: int
 
 
 class ModelCallRequest(BaseModel):
@@ -166,7 +201,6 @@ class ActivityRequest(BaseModel):
 
 
 class Instructions(BaseModel):
-    queue: str
     claim: str
 
 
@@ -220,5 +254,7 @@ class ClaimBundle(BaseModel):
     paid_at: str | None
     agent_thread_id: str | None
     work_run_id: int | None
+    failed_attempts: int
+    evaluation_run_id: int | None
     activity: list[Activity]
     documents_read: list[DocumentRead]

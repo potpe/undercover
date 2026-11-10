@@ -1,70 +1,61 @@
-import time
-from concurrent.futures import ThreadPoolExecutor
-
-from agent.checkpoints import claim_checkpointer
+from agent import checkpoints
 
 
 def test_sqlite_checkpointer_persists_across_connections(tmp_path, monkeypatch):
     monkeypatch.setenv("DATABASE_PATH", str(tmp_path / "business.db"))
     monkeypatch.delenv("DATABASE_URL", raising=False)
 
-    with claim_checkpointer() as first:
+    with checkpoints.claim_checkpointer() as first:
         assert first.__class__.__name__ == "SqliteSaver"
-    with claim_checkpointer() as second:
+    with checkpoints.claim_checkpointer() as second:
         assert second.__class__.__name__ == "SqliteSaver"
 
 
-def test_checkpoint_connections_are_limited_to_four_per_process(tmp_path, monkeypatch):
-    monkeypatch.setenv("DATABASE_PATH", str(tmp_path / "checkpoints.db"))
-    monkeypatch.delenv("DATABASE_URL", raising=False)
-    active = 0
-    maximum = 0
+def test_postgres_uses_one_bounded_pool_and_a_new_saver_per_claim(monkeypatch):
+    calls = []
+    savers = []
 
-    def enter_checkpoint():
-        nonlocal active, maximum
-        with claim_checkpointer():
-            active += 1
-            maximum = max(maximum, active)
-            time.sleep(0.02)
-            active -= 1
+    class FakePool:
+        def __init__(self, url, **kwargs):
+            calls.append((url, kwargs))
+            self.closed = False
 
-    with ThreadPoolExecutor(max_workers=5) as pool:
-        list(pool.map(lambda _: enter_checkpoint(), range(5)))
-
-    assert maximum == 4
-
-
-def test_postgres_checkpointer_uses_lab_connection_settings(monkeypatch):
-    calls = {}
-
-    class FakeConnection:
         def close(self):
-            calls["closed"] = True
+            self.closed = True
 
     class FakeSaver:
-        def __init__(self, connection):
-            calls["connection"] = connection
+        def __init__(self, pool):
+            self.pool = pool
+            self.lock = object()
+            savers.append(self)
 
         def setup(self):
-            calls["setup"] = True
-
-    def fake_connect(url, **kwargs):
-        calls["url"] = url
-        calls["kwargs"] = kwargs
-        return FakeConnection()
+            calls.append(("setup", {}))
 
     monkeypatch.setenv("DATABASE_URL", "postgresql://postgres@localhost/postgres")
-    monkeypatch.setattr("agent.checkpoints.psycopg.connect", fake_connect)
-    monkeypatch.setattr("agent.checkpoints.PostgresSaver", FakeSaver)
+    monkeypatch.setattr(checkpoints, "ConnectionPool", FakePool)
+    monkeypatch.setattr(checkpoints, "PostgresSaver", FakeSaver)
+    checkpoints.postgres_pool.cache_clear()
 
-    with claim_checkpointer():
+    with checkpoints.claim_checkpointer() as first:
+        pass
+    with checkpoints.claim_checkpointer() as second:
+        pass
+    with checkpoints.claim_checkpointer() as third:
         pass
 
-    assert calls["kwargs"] == {
-        "autocommit": True,
-        "prepare_threshold": 0,
-        "row_factory": calls["kwargs"]["row_factory"],
-        "options": "-c search_path=undercover",
-    }
-    assert calls["setup"] is True
-    assert calls["closed"] is True
+    assert len(calls) == 2
+    url, options = calls[0]
+    assert url == "postgresql://postgres@localhost/postgres"
+    assert options["min_size"] == 0
+    assert options["max_size"] == 4
+    assert options["kwargs"]["autocommit"] is True
+    assert options["kwargs"]["prepare_threshold"] == 0
+    assert options["kwargs"]["options"] == "-c search_path=undercover"
+    assert first is not second
+    first_pool = first.__dict__["pool"]
+    assert first_pool is second.__dict__["pool"] is third.__dict__["pool"]
+    assert len({id(saver.lock) for saver in savers}) == 4
+
+    checkpoints.close_checkpoint_pool()
+    assert first_pool.closed is True

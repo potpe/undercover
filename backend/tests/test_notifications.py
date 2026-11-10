@@ -1,6 +1,6 @@
 import httpx
 
-from backend import main
+from backend import agent_service
 
 
 def test_signoff_stands_when_agent_service_is_unavailable(client, monkeypatch):
@@ -18,7 +18,7 @@ def test_signoff_stands_when_agent_service_is_unavailable(client, monkeypatch):
     def unavailable(*args, **kwargs):
         raise httpx.ConnectError("Agent offline")
 
-    monkeypatch.setattr(main, "agent_post", unavailable)
+    monkeypatch.setattr(agent_service, "agent_post", unavailable)
     response = client.post(
         "/api/claims/CLM-1003/sign-off", json={"handler_id": "HND-01"}
     )

@@ -1,4 +1,3 @@
-from backend import main
 from backend.database import (
     add_activity,
     create_db_engine,
@@ -7,8 +6,7 @@ from backend.database import (
 )
 
 
-def test_reseed_restores_the_queue_and_clears_all_work(client, monkeypatch):
-    monkeypatch.setattr(main, "notify_agent_run", lambda run_id: None)
+def test_reseed_restores_the_queue_and_clears_all_work(client):
     client.post(
         "/api/claims/CLM-1001/decision",
         json={
@@ -19,7 +17,14 @@ def test_reseed_restores_the_queue_and_clears_all_work(client, monkeypatch):
         },
     )
     add_activity("CLM-1001", "Extra work")
-    client.post("/api/runs", json={"thread_id": "old", "claim_cap": 1})
+    client.post(
+        "/api/internal/dispatches",
+        json={
+            "concurrency": 1,
+            "model_name": "openai/gpt-6-luna",
+            "reasoning_effort": "low",
+        },
+    )
 
     reseed_database()
     reseed_database()
@@ -31,7 +36,7 @@ def test_reseed_restores_the_queue_and_clears_all_work(client, monkeypatch):
     assert bundle["decision"] is None
     assert bundle["activity"] == []
     assert bundle["documents_read"] == []
-    assert client.get("/api/runs/current").json() is None
+    assert client.get("/api/dispatches/current").json() is None
 
 
 def test_normal_initialization_preserves_existing_work(client):

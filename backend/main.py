@@ -1,14 +1,15 @@
 """The UnderCover backend."""
 
-import os
 from collections.abc import AsyncIterator
-from contextlib import asynccontextmanager, suppress
+from contextlib import asynccontextmanager
+from http import HTTPStatus
 from pathlib import Path
 from typing import Any
 
 import httpx
 from fastapi import BackgroundTasks, FastAPI, HTTPException
 
+from backend import agent_service
 from backend.database import (
     add_activity,
     get_claim_bundle,
@@ -22,43 +23,46 @@ from backend.database import (
 )
 from backend.models import (
     ActivityRequest,
-    AgentRun,
     ClaimBundle,
     ClaimSummary,
+    CompleteWorkRequest,
+    CreateRunRequest,
     DecisionRequest,
+    DispatchRequest,
     DocumentSearchRequest,
     DocumentSectionContent,
     DocumentSectionRequest,
     DocumentSectionSummary,
     FailureRequest,
-    FinishRunRequest,
     Instructions,
     ModelCallRequest,
     PaymentRequest,
     PayoutRequest,
     PayoutResponse,
-    QueueRunRequest,
-    RunPlanRequest,
+    RunRecord,
     RunRequest,
     RunResponse,
     SignOffRequest,
+    StoppedRuns,
+    WorkContext,
     WorkOutcome,
     WorkPeriodRequest,
-    WorkRequest,
 )
 from backend.payout import calculate_claim_payout
 from backend.runs import (
-    create_run as create_agent_run,
-)
-from backend.runs import (
-    current_run,
+    begin_work,
+    complete_work,
+    create_dispatch,
+    current_dispatch,
     fail_claim,
+    fail_work,
     finish_run,
     get_run,
-    save_plan,
-    work_claim,
+    leave_work,
+    stop_active_runs,
+    stop_run,
 )
-from backend.workflow import record_decision, record_payment, sign_off
+from backend.workflow import record_decision, record_payment, sign_off, start_run
 
 
 @asynccontextmanager
@@ -70,33 +74,17 @@ async def lifespan(_: FastAPI) -> AsyncIterator[None]:
 app = FastAPI(title="UnderCover", lifespan=lifespan)
 
 
-def agent_post(
-    path: str, timeout: float, body: dict[str, Any] | None = None
-) -> httpx.Response:
-    base_url = os.getenv("UNDERCOVER_AGENT", "http://127.0.0.1:8002")
-    with httpx.Client(base_url=base_url, timeout=timeout) as client:
-        return client.post(path, json=body)
-
-
-def notify_agent_run(run_id: int) -> None:
-    with suppress(httpx.HTTPError):
-        agent_post(f"/runs/{run_id}", 5).raise_for_status()
-
-
-def notify_agent_resume(claim_id: str) -> None:
-    with suppress(httpx.HTTPError):
-        agent_post(f"/claims/{claim_id}/resume", 5).raise_for_status()
-
-
-def run_claim_via_service(claim_id: str, thread_id: str) -> str:
-    run_id = int(thread_id.split(":", 1)[0])
-    response = agent_post(
-        f"/claims/{claim_id}/work",
-        120,
-        {"thread_id": thread_id, "run_id": run_id},
+def service_error(error: httpx.HTTPError) -> HTTPException:
+    if (
+        isinstance(error, httpx.HTTPStatusError)
+        and error.response.status_code == HTTPStatus.CONFLICT
+    ):
+        return HTTPException(
+            status_code=HTTPStatus.CONFLICT, detail=error.response.json()["detail"]
+        )
+    return HTTPException(
+        status_code=503, detail="The agent service is not running or could not start"
     )
-    response.raise_for_status()
-    return response.json()["result"]
 
 
 @app.get("/api/health", operation_id="health")
@@ -107,7 +95,7 @@ def health() -> dict[str, str]:
 
 @app.get("/api/claims", operation_id="list_claims")
 def claims() -> list[ClaimSummary]:
-    """List the claims queue."""
+    """List the operational claims queue."""
     return [ClaimSummary(**claim) for claim in list_claims()]
 
 
@@ -139,7 +127,7 @@ def sign_off_claim(
 ) -> ClaimBundle:
     """Save handler sign-off and ask the agent to resume payment."""
     sign_off(claim_id, request)
-    background_tasks.add_task(notify_agent_resume, claim_id)
+    background_tasks.add_task(agent_service.notify_resume, claim_id)
     return claim(claim_id)
 
 
@@ -161,52 +149,113 @@ def payment(claim_id: str, request: PaymentRequest) -> ClaimBundle:
 def run_claim(
     claim_id: str, request: RunRequest, background_tasks: BackgroundTasks
 ) -> RunResponse:
-    """Start the UnderCover Agent on a waiting claim."""
-    run = create_agent_run(request.thread_id, 1, claim_id)
-    background_tasks.add_task(notify_agent_run, run["run_id"])
-    return RunResponse(run_id=run["run_id"], claim_id=claim_id, status="in_progress")
+    """Work one named claim without creating a dispatch or evaluation."""
+    start_run(claim_id)
+    background_tasks.add_task(
+        agent_service.work_named_claim, claim_id, request.thread_id
+    )
+    return RunResponse(claim_id=claim_id, status="in_progress")
 
 
-@app.post("/api/runs", operation_id="create_queue_run", status_code=202)
-def queue_run(request: QueueRunRequest, background_tasks: BackgroundTasks) -> AgentRun:
-    """Start a capped queue run for the UnderCover Agent."""
-    run = create_agent_run(request.thread_id, request.claim_cap)
-    background_tasks.add_task(notify_agent_run, run["run_id"])
-    return AgentRun(**run)
+@app.post("/api/dispatches", operation_id="start_dispatch", status_code=202)
+def start_dispatch(request: DispatchRequest) -> RunRecord:
+    """Ask the agent service to start a dispatch with N claim agents."""
+    try:
+        response = agent_service.start_dispatch(request.concurrency)
+    except httpx.HTTPError as error:
+        raise service_error(error) from error
+    return RunRecord(**response.json())
 
 
-@app.get("/api/runs/current", operation_id="get_current_run")
-def current_agent_run() -> AgentRun | None:
-    """Return the active or latest agent run."""
-    run = current_run()
-    return AgentRun(**run) if run else None
+@app.get("/api/dispatches/current", operation_id="get_current_dispatch")
+def get_current_dispatch() -> RunRecord | None:
+    """Return the latest dispatch and its record-built progress."""
+    run = current_dispatch()
+    return RunRecord(**run) if run else None
 
 
-@app.get("/api/runs/{run_id}", operation_id="get_agent_run")
-def get_agent_run(run_id: int) -> AgentRun:
-    """Return one agent run and its ordered to-dos."""
+@app.post("/api/internal/dispatches", operation_id="create_dispatch", status_code=201)
+def internal_create_dispatch(request: CreateRunRequest) -> RunRecord:
+    """Create the agent service's dispatch and select its claims."""
+    return RunRecord(
+        **create_dispatch(
+            request.concurrency, request.model_name, request.reasoning_effort
+        )
+    )
+
+
+@app.post("/api/internal/runs/stop-active", operation_id="stop_active_runs")
+def internal_stop_active_runs() -> StoppedRuns:
+    """Mark runs left in progress by a stopped agent service as stopped."""
+    return StoppedRuns(stopped=stop_active_runs())
+
+
+@app.get("/api/internal/runs/{run_id}", operation_id="get_run")
+def internal_get_run(run_id: int) -> RunRecord:
+    """Return one run for the agent service."""
+    return RunRecord(**get_run_or_404(run_id))
+
+
+def get_run_or_404(run_id: int) -> dict[str, Any]:
     run = get_run(run_id)
     if run is None:
         raise HTTPException(status_code=404, detail="Run not found")
-    return AgentRun(**run)
+    return run
 
 
-@app.post("/api/runs/{run_id}/plan", operation_id="plan_agent_run")
-def plan_agent_run(run_id: int, request: RunPlanRequest) -> AgentRun:
-    """Save an agent-selected ordered plan within the run cap."""
-    return AgentRun(**save_plan(run_id, request.claim_ids, request.model_name))
+@app.post(
+    "/api/internal/runs/{run_id}/claims/{claim_id}/begin",
+    operation_id="begin_run_claim",
+)
+def internal_begin_work(run_id: int, claim_id: str) -> WorkContext:
+    """Begin or resume one selected claim on its own durable thread."""
+    return WorkContext(**begin_work(run_id, claim_id))
 
 
-@app.post("/api/runs/{run_id}/work", operation_id="work_run_claim")
-def work_run_claim(run_id: int, request: WorkRequest) -> WorkOutcome:
-    """Work one selected claim through the agent service."""
-    return WorkOutcome(**work_claim(run_id, request.claim_id, run_claim_via_service))
+@app.post(
+    "/api/internal/runs/{run_id}/claims/{claim_id}/complete",
+    operation_id="complete_run_claim",
+)
+def internal_complete_work(
+    run_id: int, claim_id: str, request: CompleteWorkRequest
+) -> WorkOutcome:
+    """Mark a selected claim done after checking its backend state."""
+    return WorkOutcome(**complete_work(run_id, claim_id, request.result))
 
 
-@app.post("/api/runs/{run_id}/finish", operation_id="finish_agent_run")
-def finish_agent_run(run_id: int, request: FinishRunRequest) -> AgentRun:
-    """Complete a run after checking for unfinished selected claims."""
-    return AgentRun(**finish_run(run_id, request.summary))
+@app.post(
+    "/api/internal/runs/{run_id}/claims/{claim_id}/fail",
+    operation_id="fail_run_claim",
+)
+def internal_fail_work(
+    run_id: int, claim_id: str, request: FailureRequest
+) -> WorkOutcome:
+    """Fail a claim and return whether the same dispatch may retry it."""
+    return WorkOutcome(**fail_work(run_id, claim_id, request.error))
+
+
+@app.post(
+    "/api/internal/runs/{run_id}/claims/{claim_id}/leave",
+    operation_id="leave_run_claim",
+)
+def internal_leave_work(
+    run_id: int, claim_id: str, request: FailureRequest
+) -> WorkOutcome:
+    """Leave a rate-limited or timed-out claim for the next dispatch."""
+    return WorkOutcome(**leave_work(run_id, claim_id, request.error))
+
+
+@app.post("/api/internal/runs/{run_id}/stop", operation_id="stop_run")
+def internal_stop_run(run_id: int, request: FailureRequest) -> RunRecord:
+    """Stop a run after an agent-service orchestration error."""
+    stop_run(run_id, request.error)
+    return RunRecord(**get_run_or_404(run_id))
+
+
+@app.post("/api/internal/runs/{run_id}/finish", operation_id="finish_run")
+def internal_finish_run(run_id: int) -> RunRecord:
+    """Finish a run with a summary and totals built from its records."""
+    return RunRecord(**finish_run(run_id))
 
 
 @app.post("/api/claims/{claim_id}/model-calls", operation_id="record_model_call")
@@ -264,14 +313,11 @@ def document_section(
 
 @app.get("/api/agent/instructions", operation_id="get_agent_instructions")
 def agent_instructions() -> Instructions:
-    """Return the queue and claim agents' read-only instructions."""
-    queue = (
-        Path(__file__).with_name("queue_instructions.md").read_text(encoding="utf-8")
-    )
+    """Return the claim agent's read-only instructions."""
     claim_text = (
         Path(__file__).with_name("agent_instructions.md").read_text(encoding="utf-8")
     )
-    return Instructions(queue=queue, claim=claim_text)
+    return Instructions(claim=claim_text)
 
 
 @app.get("/api/handlers", operation_id="list_handlers")

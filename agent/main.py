@@ -213,14 +213,19 @@ def claim_config(
     }
 
 
+def model_settings() -> tuple[str, str | None]:
+    name = os.getenv("MODEL_NAME")
+    return name or DEFAULT_MODEL, None if name else "low"
+
+
 def model() -> ChatOpenAI:
     """Return the model named in MODEL_NAME, or GPT-6 Luna by default."""
-    name = os.getenv("MODEL_NAME")
+    name, reasoning_effort = model_settings()
     return ChatOpenAI(
-        model=name or DEFAULT_MODEL,
+        model=name,
         base_url=OPENROUTER_BASE_URL,
         api_key=SecretStr(os.environ["OPENROUTER_API_KEY"]),
-        reasoning_effort=None if name else "low",
+        reasoning_effort=reasoning_effort,
         timeout=60,
         max_completion_tokens=8192,
     )

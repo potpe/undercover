@@ -1,187 +1,276 @@
+import json
+from pathlib import Path
+
+import httpx
 from sqlalchemy import update
 
-from backend import main
-from backend.database import claims_table, connect, run_todos_table
+from backend import agent_service
+from backend.database import claims_table, connect
+from backend.models import DecisionKind, DecisionRequest, PaymentRequest
+from backend.workflow import record_decision, record_payment
 
 
-def create_run(client, cap=5, thread_id="thread-queue"):
-    return client.post("/api/runs", json={"thread_id": thread_id, "claim_cap": cap})
-
-
-def plan(client, run_id, claim_ids, model="openai/gpt-6-luna"):
+def create_dispatch(
+    client, concurrency=3, model="openai/gpt-6-luna", effort: str | None = "low"
+):
     return client.post(
-        f"/api/runs/{run_id}/plan",
-        json={"claim_ids": claim_ids, "model_name": model},
-    )
-
-
-def test_run_starts_empty_and_plan_preserves_agent_order(client):
-    created = create_run(client)
-    assert created.status_code == 202
-    run = created.json()
-    assert run["thread_id"] == "thread-queue"
-    assert run["claim_cap"] == 5
-    assert run["target_claim_id"] is None
-    assert run["status"] == "in_progress"
-    assert run["todos"] == []
-
-    response = plan(
-        client,
-        run["run_id"],
-        ["CLM-1005", "CLM-1002", "CLM-1004", "CLM-1001", "CLM-1003"],
-    )
-
-    assert response.status_code == 200
-    todos = response.json()["todos"]
-    assert [todo["claim_id"] for todo in todos] == [
-        "CLM-1005",
-        "CLM-1002",
-        "CLM-1004",
-        "CLM-1001",
-        "CLM-1003",
-    ]
-    assert [todo["position"] for todo in todos] == [1, 2, 3, 4, 5]
-    assert {todo["status"] for todo in todos} == {"to_do"}
-    assert all(todo["attempts"] == 0 for todo in todos)
-    assert all(todo["result"] is None and todo["error"] is None for todo in todos)
-    assert response.json()["model_name"] == "openai/gpt-6-luna"
-    assert response.json()["reasoning_effort"] == "low"
-
-
-def test_run_records_no_reasoning_for_a_model_override(client, monkeypatch):
-    monkeypatch.setenv("MODEL_NAME", "openrouter/free")
-    run_id = create_run(client, cap=1).json()["run_id"]
-
-    response = plan(client, run_id, ["CLM-1001"], model="openrouter/free")
-
-    assert response.json()["model_name"] == "openrouter/free"
-    assert response.json()["reasoning_effort"] is None
-
-
-def test_plan_rejects_over_cap_duplicates_and_underfill(client):
-    run_id = create_run(client).json()["run_id"]
-
-    over_cap = plan(client, run_id, [f"CLM-{number}" for number in range(1001, 1008)])
-    assert over_cap.status_code == 409
-    assert over_cap.json() == {"detail": "Plan exceeds the run's claim cap"}
-
-    duplicates = plan(client, run_id, ["CLM-1001", "CLM-1001"])
-    assert duplicates.status_code == 409
-    assert duplicates.json() == {"detail": "Plan contains duplicate claims"}
-
-    underfilled = plan(client, run_id, ["CLM-1001", "CLM-1002"])
-    assert underfilled.status_code == 409
-    assert underfilled.json() == {"detail": "Plan does not fill the run's claim cap"}
-
-
-def test_plan_rejects_unknown_and_nonwaiting_claims(client):
-    run_id = create_run(client, cap=1).json()["run_id"]
-    unknown = plan(client, run_id, ["CLM-9999"])
-    assert unknown.status_code == 404
-
-    client.post(
-        "/api/claims/CLM-1001/decision",
+        "/api/internal/dispatches",
         json={
-            "decision": "decline",
-            "payout": 0,
-            "reason": "The wording excludes this loss. The cited section applies.",
-            "policy_section": "Section 9: General exclusions",
+            "concurrency": concurrency,
+            "model_name": model,
+            "reasoning_effort": effort,
         },
     )
-    decided = plan(client, run_id, ["CLM-1001"])
-    assert decided.status_code == 409
-    assert decided.json() == {"detail": "Plan includes a claim that is not waiting"}
 
 
-def test_second_plan_is_rejected(client):
-    run_id = create_run(client, cap=1).json()["run_id"]
-    assert plan(client, run_id, ["CLM-1001"]).status_code == 200
-
-    second = plan(client, run_id, ["CLM-1002"])
-
-    assert second.status_code == 409
-    assert second.json() == {"detail": "Run already has a plan"}
+def begin(client, run_id, claim_id):
+    return client.post(f"/api/internal/runs/{run_id}/claims/{claim_id}/begin")
 
 
-def test_cap_boundaries_and_smaller_available_queue(client):
-    assert create_run(client, cap=0).status_code == 422
-    assert create_run(client, cap=26).status_code == 422
-
-    run_id = create_run(client, cap=25).json()["run_id"]
-    response = plan(client, run_id, [f"CLM-{n}" for n in range(1001, 1026)])
-    assert response.status_code == 200
-    assert len(response.json()["todos"]) == 25
+def complete(client, run_id, claim_id, result=None):
+    return client.post(
+        f"/api/internal/runs/{run_id}/claims/{claim_id}/complete",
+        json={"result": result or f"{claim_id} done"},
+    )
 
 
-def test_plan_uses_only_available_waiting_claims(client):
+def decide(claim_id, kind: DecisionKind = "approve", payout=420):
+    record_decision(
+        claim_id,
+        DecisionRequest(
+            decision=kind,
+            payout=payout,
+            reason=(
+                "The evidence supports this decision under the cited policy wording."
+            ),
+            policy_section="Section 3: Trip Delay; Section 10: Payment",
+        ),
+    )
+
+
+def test_dispatch_selects_all_eligible_claims_oldest_first(client):
+    response = create_dispatch(client, concurrency=3)
+
+    assert response.status_code == 201
+    run = response.json()
+    expected = [
+        claim["claim_id"]
+        for claim in sorted(
+            json.loads(Path("data/claims.json").read_text()),
+            key=lambda claim: (claim["submitted_on"], claim["claim_id"]),
+        )
+    ]
+    assert run["kind"] == "dispatch"
+    assert run["status"] == "in_progress"
+    assert run["concurrency"] == 3
+    assert run["model_name"] == "openai/gpt-6-luna"
+    assert run["reasoning_effort"] == "low"
+    assert [claim["claim_id"] for claim in run["claims"]] == expected
+    assert len(run["claims"]) == 25
+    assert client.get("/api/dispatches/current").json()["run_id"] == run["run_id"]
+
+
+def test_dispatch_excludes_settled_held_handler_and_evaluation_claims(client):
     with connect() as connection:
         connection.execute(
             update(claims_table)
-            .where(claims_table.c.claim_id.not_in(["CLM-1001", "CLM-1002"]))
+            .where(claims_table.c.claim_id == "CLM-1001")
             .values(status="decided")
         )
-    run_id = create_run(client, cap=5).json()["run_id"]
+        connection.execute(
+            update(claims_table)
+            .where(claims_table.c.claim_id == "CLM-1002")
+            .values(status="waiting_for_sign_off")
+        )
+        connection.execute(
+            update(claims_table)
+            .where(claims_table.c.claim_id == "CLM-1003")
+            .values(status="left_for_handler")
+        )
+        connection.execute(
+            update(claims_table)
+            .where(claims_table.c.claim_id == "CLM-1004")
+            .values(status="in_progress", agent_thread_id="saved-thread")
+        )
+        connection.execute(
+            update(claims_table)
+            .where(claims_table.c.claim_id == "CLM-1005")
+            .values(evaluation_run_id=99)
+        )
 
-    response = plan(client, run_id, ["CLM-1002", "CLM-1001"])
+    run = create_dispatch(client).json()
 
-    assert response.status_code == 200
-    assert len(response.json()["todos"]) == 2
+    assert "CLM-1004" in [claim["claim_id"] for claim in run["claims"]]
+    assert len(run["claims"]) == 21
+    assert {
+        "CLM-1001",
+        "CLM-1002",
+        "CLM-1003",
+        "CLM-1005",
+    }.isdisjoint(claim["claim_id"] for claim in run["claims"])
 
 
-def test_named_claim_run_has_a_fixed_cap_one_target(client, monkeypatch):
-    monkeypatch.setattr(
-        main, "run_claim_via_service", lambda claim_id, thread_id: "No decision"
+def test_second_active_run_is_refused_and_override_effort_is_recorded(client):
+    first = create_dispatch(client, concurrency=1)
+    second = create_dispatch(client, concurrency=25)
+
+    assert first.status_code == 201
+    assert second.status_code == 409
+    assert second.json() == {"detail": "Another dispatch or evaluation is running"}
+
+    stopped = client.post("/api/internal/runs/stop-active")
+    assert stopped.json()["stopped"] == 1
+    override = create_dispatch(client, model="openrouter/free", effort=None).json()
+    assert override["model_name"] == "openrouter/free"
+    assert override["reasoning_effort"] is None
+
+
+def test_begin_resumes_saved_thread_and_new_failure_gets_a_fresh_thread(client):
+    run_id = create_dispatch(client).json()["run_id"]
+
+    started = begin(client, run_id, "CLM-1001").json()
+    failed = client.post(
+        f"/api/internal/runs/{run_id}/claims/CLM-1001/fail",
+        json={"error": "Provider response was invalid"},
+    ).json()
+    waiting = client.get("/api/claims/CLM-1001").json()
+    retried = begin(client, run_id, "CLM-1001").json()
+
+    assert started["thread_id"] == f"{run_id}:CLM-1001:attempt-1"
+    assert failed["status"] == "retry"
+    assert failed["attempts"] == 1
+    assert waiting["claim"]["status"] == "waiting"
+    assert retried["thread_id"] == f"{run_id}:CLM-1001:attempt-2"
+    assert retried["attempts"] == 1
+
+    client.post(
+        f"/api/internal/runs/{run_id}/claims/CLM-1001/fail",
+        json={"error": "Provider response was invalid again"},
     )
-
-    response = client.post("/api/claims/CLM-1001/run", json={"thread_id": "single"})
-    assert response.status_code == 202
-    run_id = response.json()["run_id"]
-    current = client.get("/api/runs/current").json()
-    assert current["claim_cap"] == 1
-    assert current["target_claim_id"] == "CLM-1001"
-
-    wrong_claim = plan(client, run_id, ["CLM-1002"])
-    assert wrong_claim.status_code == 409
-    assert wrong_claim.json() == {"detail": "Plan does not match the named claim"}
+    left = client.get("/api/claims/CLM-1001").json()
+    assert left["claim"]["status"] == "left_for_handler"
+    assert begin(client, run_id, "CLM-1001").json()["status"] == "left_for_handler"
 
 
-def test_current_run_keeps_latest_completed_summary(client):
-    run_id = create_run(client, cap=1).json()["run_id"]
-    plan(client, run_id, ["CLM-1001"])
+def test_record_built_summary_and_usage_totals(client):
     with connect() as connection:
         connection.execute(
-            update(run_todos_table)
-            .where(run_todos_table.c.run_id == run_id)
-            .values(status="done")
+            update(claims_table)
+            .where(
+                ~claims_table.c.claim_id.in_(
+                    [
+                        "CLM-1001",
+                        "CLM-1002",
+                        "CLM-1003",
+                        "CLM-1004",
+                        "CLM-1005",
+                        "CLM-1006",
+                    ]
+                )
+            )
+            .values(status="decided")
         )
-    unfinished = client.post(
-        f"/api/runs/{run_id}/finish", json={"summary": "One claim completed."}
+    run_id = create_dispatch(client).json()["run_id"]
+
+    begin(client, run_id, "CLM-1001")
+    decide("CLM-1001")
+    record_payment("CLM-1001", PaymentRequest(amount=420))
+    complete(client, run_id, "CLM-1001")
+
+    begin(client, run_id, "CLM-1002")
+    decide("CLM-1002", "decline", 0)
+    complete(client, run_id, "CLM-1002")
+
+    begin(client, run_id, "CLM-1003")
+    decide("CLM-1003", payout=3750)
+    complete(client, run_id, "CLM-1003")
+
+    begin(client, run_id, "CLM-1004")
+    decide("CLM-1004", "refer", 0)
+    complete(client, run_id, "CLM-1004")
+
+    begin(client, run_id, "CLM-1005")
+    for error in ("First invalid response", "Second invalid response"):
+        client.post(
+            f"/api/internal/runs/{run_id}/claims/CLM-1005/fail",
+            json={"error": error},
+        )
+
+    begin(client, run_id, "CLM-1006")
+    client.post(
+        f"/api/internal/runs/{run_id}/claims/CLM-1006/leave",
+        json={"error": "Rate limit retries exhausted"},
     )
-    assert unfinished.status_code == 200
-    assert unfinished.json()["status"] == "completed"
+    client.post(
+        "/api/claims/CLM-1001/model-calls",
+        json={
+            "run_id": run_id,
+            "model_name": "openai/gpt-6-luna",
+            "reasoning_effort": "low",
+            "prompt_tokens": 100,
+            "completion_tokens": 20,
+            "total_tokens": 120,
+            "cost": 0.125,
+        },
+    )
+    client.post(
+        "/api/claims/CLM-1001/work-periods",
+        json={
+            "run_id": run_id,
+            "thread_id": "thread-1",
+            "started_at": "2026-11-10T12:00:00Z",
+            "finished_at": "2026-11-10T12:00:02Z",
+            "seconds": 2,
+        },
+    )
 
-    current = client.get("/api/runs/current")
-    specific = client.get(f"/api/runs/{run_id}")
-    assert current.json()["run_id"] == run_id
-    assert current.json()["summary"] == "One claim completed."
-    assert current.json()["completed_at"]
-    assert specific.json()["todos"][0]["status"] == "done"
+    finished = client.post(f"/api/internal/runs/{run_id}/finish")
+    assert finished.status_code == 200, finished.json()
+    run = finished.json()
+    assert run["status"] == "completed"
+    assert run["summary"]["approved"] == 2
+    assert run["summary"]["declined"] == 1
+    assert run["summary"]["referred"] == 1
+    assert run["summary"]["waiting_for_sign_off"] == [
+        {"claim_id": "CLM-1003", "payout": 3750.0}
+    ]
+    assert run["summary"]["left_for_handler"] == ["CLM-1005"]
+    assert run["summary"]["in_progress"] == ["CLM-1006"]
+    assert run["model_cost"] == 0.125
+    assert run["active_seconds"] == 2.0
+    assert run["wall_seconds"] >= 0
 
 
-def test_next_run_resumes_the_existing_active_run(client):
-    first = create_run(client, cap=2, thread_id="original")
+def test_public_start_contacts_service_before_creating_any_record(client, monkeypatch):
+    calls = []
 
-    resumed = create_run(client, cap=5, thread_id="replacement")
+    def unavailable(*args, **kwargs):
+        calls.append(args)
+        raise httpx.ConnectError("Agent offline")
 
-    assert resumed.status_code == 202
-    assert resumed.json()["run_id"] == first.json()["run_id"]
-    assert resumed.json()["thread_id"] == "original"
-    assert resumed.json()["claim_cap"] == 2
-    assert len(client.get("/api/claims").json()) == 25
+    monkeypatch.setattr(agent_service, "agent_post", unavailable)
+
+    response = client.post("/api/dispatches", json={"concurrency": 3})
+
+    assert response.status_code == 503
+    assert response.json()["detail"] == (
+        "The agent service is not running or could not start"
+    )
+    assert calls
+    assert client.get("/api/dispatches/current").json() is None
 
 
-def test_current_run_is_null_before_the_first_run(client):
-    response = client.get("/api/runs/current")
+def test_stopping_active_run_preserves_claim_threads_and_attempts(client):
+    run_id = create_dispatch(client).json()["run_id"]
+    started = begin(client, run_id, "CLM-1001").json()
 
-    assert response.status_code == 200
-    assert response.json() is None
+    stopped = client.post("/api/internal/runs/stop-active")
+
+    assert stopped.json()["stopped"] == 1
+    run = client.get(f"/api/internal/runs/{run_id}").json()
+    claim = client.get("/api/claims/CLM-1001").json()
+    assert run["status"] == "stopped"
+    assert run["stopped_at"] is not None
+    assert claim["claim"]["status"] == "in_progress"
+    assert claim["agent_thread_id"] == started["thread_id"]
+    assert run["claims"][0]["attempts"] == 0

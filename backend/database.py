@@ -9,6 +9,7 @@ from typing import Any
 
 from sqlalchemy import (
     JSON,
+    Boolean,
     Column,
     Connection,
     DateTime,
@@ -55,6 +56,8 @@ claims_table = Table(
     Column("paid_amount", Numeric),
     Column("agent_thread_id", String),
     Column("work_run_id", Integer),
+    Column("failed_attempts", Integer, nullable=False, default=0),
+    Column("evaluation_run_id", Integer),
     Column("signed_off_at", DateTime(timezone=True)),
     Column("paid_at", DateTime(timezone=True)),
 )
@@ -119,24 +122,26 @@ runs_table = Table(
     "runs",
     metadata,
     Column("run_id", Integer, primary_key=True, autoincrement=True),
-    Column("thread_id", String, nullable=False),
-    Column("claim_cap", Integer, nullable=False),
-    Column("target_claim_id", String),
-    Column("model_name", String),
+    Column("kind", String, nullable=False),
+    Column("concurrency", Integer, nullable=False),
+    Column("model_name", String, nullable=False),
     Column("reasoning_effort", String),
+    Column("evaluation_set", String),
+    Column("tiny", Boolean),
     Column("status", String, nullable=False),
-    Column("summary", Text),
+    Column("summary", JSON),
     Column("created_at", DateTime(timezone=True), nullable=False),
     Column("completed_at", DateTime(timezone=True)),
+    Column("stopped_at", DateTime(timezone=True)),
 )
-run_todos_table = Table(
-    "run_todos",
+run_claims_table = Table(
+    "run_claims",
     metadata,
     Column("run_id", Integer, primary_key=True),
     Column("claim_id", String, primary_key=True),
+    Column("source_claim_id", String),
     Column("position", Integer, nullable=False),
     Column("status", String, nullable=False),
-    Column("attempts", Integer, nullable=False, default=0),
     Column("result", Text),
     Column("error", Text),
     UniqueConstraint("run_id", "position"),
@@ -364,6 +369,7 @@ def list_claims() -> list[dict[str, Any]]:
                     customers_table,
                     claims_table.c.customer_id == customers_table.c.customer_id,
                 )
+                .where(claims_table.c.evaluation_run_id.is_(None))
                 .order_by(claims_table.c.claim_id)
             )
             .mappings()
@@ -467,6 +473,8 @@ def get_claim_bundle(claim_id: str) -> dict[str, Any] | None:
         "paid_at": iso(row["paid_at"]),
         "agent_thread_id": row["agent_thread_id"],
         "work_run_id": row["work_run_id"],
+        "failed_attempts": row["failed_attempts"],
+        "evaluation_run_id": row["evaluation_run_id"],
         "activity": [
             {
                 "id": activity["id"],

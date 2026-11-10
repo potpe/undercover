@@ -148,18 +148,18 @@ Build the new backend run/run-claim lifecycle and the lab-style dispatcher. Conn
 
 ### Success criteria
 
-- [ ] A stand-in worker test with at least 25 claims proves oldest-submitted selection, one `Send` per claim, additive results and never more than N concurrent invocations at N=1, 3 and 25. The dispatcher graph contains no model and no checkpointer.
-- [ ] Dispatch selection includes every operational `waiting` and `in_progress` claim, excludes every other state and all evaluation copies, and is not capped to N claims. Each run-claim retains its selected order.
-- [ ] A stub claim that raises `ModelRateLimitError` once resumes from its saved step on the same thread with no new failed attempt and records one decision/payment. Separate timeout coverage exercises the same policy without real sleeps.
-- [ ] A worker that exhausts its rate-limit/timeout retries leaves the claim and run-claim `in_progress`, preserves its thread/attempt, appears in the record-built summary, and does not stop other claims. A later dispatch resumes it.
-- [ ] An ordinary stub error returns the claim to waiting and the same dispatch retries once with a fresh thread; a second ordinary error leaves it for a handler. No claim receives a third attempt, and one bad claim does not stop its peers.
-- [ ] Tests replay decision/payment boundaries under parallel workers and prove unchanged decisions, amounts, handlers and timestamps, one success activity per business effect, and no duplicate payment.
-- [ ] A simulated stopped dispatch leaves attempts/threads intact; startup marks that run stopped, and a new dispatch resumes its unfinished claims without recreating the old run or reworking decided/held claims. A claim actively resuming after sign-off is skipped by dispatch.
-- [ ] Backend finalization returns exact approved/declined/referred counts, each held claim and payout, each left-for-handler id and each still-in-progress id, plus run-only cost, active seconds and wall seconds. No model participates.
-- [ ] Service tests prove one non-blocking slot across both run kinds, immediate 409 on a second start, 202/background execution for the first, and slot release after completion or orchestration failure. Backend start routes write nothing before contacting the service.
-- [ ] Fake-pool tests prove one process pool capped at four, a separate `PostgresSaver`/lock per claim, one setup, synchronous required options and waiting rather than connection failure. SQLite tests never open Postgres.
-- [ ] Queue-agent code, queue instructions, to-do APIs/table and bare CLI execution are removed or replaced; `uv run -m agent CLM-1001` still starts only that claim with no run. All affected Python tests are migrated rather than deleted without equivalent coverage.
-- [ ] `npm run check:python` passes with at least 80% coverage and hosted/model environment variables cleared.
+- [x] A stand-in worker test with at least 25 claims proves oldest-submitted selection, one `Send` per claim, additive results and never more than N concurrent invocations at N=1, 3 and 25. The dispatcher graph contains no model and no checkpointer.
+- [x] Dispatch selection includes every operational `waiting` and `in_progress` claim, excludes every other state and all evaluation copies, and is not capped to N claims. Each run-claim retains its selected order.
+- [x] A stub claim that raises `ModelRateLimitError` once resumes from its saved step on the same thread with no new failed attempt and records one decision/payment. Separate timeout coverage exercises the same policy without real sleeps.
+- [x] A worker that exhausts its rate-limit/timeout retries leaves the claim and run-claim `in_progress`, preserves its thread/attempt, appears in the record-built summary, and does not stop other claims. A later dispatch resumes it.
+- [x] An ordinary stub error returns the claim to waiting and the same dispatch retries once with a fresh thread; a second ordinary error leaves it for a handler. No claim receives a third attempt, and one bad claim does not stop its peers.
+- [x] Tests replay decision/payment boundaries under parallel workers and prove unchanged decisions, amounts, handlers and timestamps, one success activity per business effect, and no duplicate payment.
+- [x] A simulated stopped dispatch leaves attempts/threads intact; startup marks that run stopped, and a new dispatch resumes its unfinished claims without recreating the old run or reworking decided/held claims. A claim actively resuming after sign-off is skipped by dispatch.
+- [x] Backend finalization returns exact approved/declined/referred counts, each held claim and payout, each left-for-handler id and each still-in-progress id, plus run-only cost, active seconds and wall seconds. No model participates.
+- [x] Service tests prove one non-blocking slot across both run kinds, immediate 409 on a second start, 202/background execution for the first, and slot release after completion or orchestration failure. Backend start routes write nothing before contacting the service.
+- [x] Fake-pool tests prove one process pool capped at four, a separate `PostgresSaver`/lock per claim, one setup, synchronous required options and waiting rather than connection failure. SQLite tests never open Postgres.
+- [x] Queue-agent code, queue instructions, to-do APIs/table and bare CLI execution are removed or replaced; `uv run -m agent CLM-1001` still starts only that claim with no run. All affected Python tests are migrated rather than deleted without equivalent coverage.
+- [x] `npm run check:python` passes with at least 80% coverage and hosted/model environment variables cleared.
 
 ## Phase 3: Start and inspect dispatches from the dashboard
 

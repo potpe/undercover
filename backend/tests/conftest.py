@@ -1,7 +1,7 @@
 import pytest
 from fastapi.testclient import TestClient
 
-from backend import main
+from backend import agent_service
 from backend.main import app
 
 
@@ -22,6 +22,6 @@ def client(tmp_path, monkeypatch):
         def raise_for_status(self):
             return None
 
-    monkeypatch.setattr(main, "agent_post", lambda *args, **kwargs: Accepted())
+    monkeypatch.setattr(agent_service, "agent_post", lambda *args, **kwargs: Accepted())
     with TestClient(app) as test_client:
         yield test_client

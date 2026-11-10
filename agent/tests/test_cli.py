@@ -1,35 +1,47 @@
+import pytest
+
 from agent import __main__ as cli
 
 
-def test_cli_starts_a_capped_run_without_running_a_model(monkeypatch):
+class Response:
+    def raise_for_status(self):
+        return None
+
+
+class Client:
     calls = []
 
-    class Response:
-        def raise_for_status(self):
-            return None
+    def __enter__(self):
+        return self
 
-        def json(self):
-            return {"run_id": 7}
+    def __exit__(self, *args):
+        return None
 
-    class Client:
-        def __enter__(self):
-            return self
+    def post(self, path, json):
+        self.calls.append((path, json))
+        return Response()
 
-        def __exit__(self, *args):
-            return None
 
-        def post(self, path, json):
-            calls.append((path, json))
-            return Response()
-
+def test_cli_starts_one_named_claim_without_a_run(monkeypatch):
+    Client.calls = []
     monkeypatch.setattr(cli, "load_dotenv", lambda override: None)
     monkeypatch.setattr(cli, "backend", Client)
-    monkeypatch.setattr("sys.argv", ["agent", "--claim-cap", "5"])
+    monkeypatch.setattr("sys.argv", ["agent", "CLM-1001"])
 
     cli.main()
 
-    assert len(calls) == 1
-    path, payload = calls[0]
-    assert path == "/api/runs"
-    assert payload["claim_cap"] == 5
+    path, payload = Client.calls[0]
+    assert path == "/api/claims/CLM-1001/run"
     assert payload["thread_id"].startswith("cli-")
+
+
+def test_cli_without_a_claim_id_shows_usage_and_does_nothing(monkeypatch):
+    Client.calls = []
+    monkeypatch.setattr(cli, "load_dotenv", lambda override: None)
+    monkeypatch.setattr(cli, "backend", Client)
+    monkeypatch.setattr("sys.argv", ["agent"])
+
+    with pytest.raises(SystemExit):
+        cli.main()
+
+    assert Client.calls == []
