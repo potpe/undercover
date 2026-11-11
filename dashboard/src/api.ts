@@ -166,6 +166,8 @@ export interface DispatchRun {
 }
 
 export interface EvaluationMeasures {
+  grade: number | null;
+  judge_cost: number;
   decision_accuracy: number;
   accuracy: number;
   cost_of_mistakes: number;
@@ -178,6 +180,14 @@ export interface EvaluationMeasures {
 }
 
 export interface EvaluationClaim extends RunClaim {
+  grade: number | null;
+  letter: "F" | "C" | "B" | "A" | null;
+  same_grounds: number | null;
+  same_section: number | null;
+  judge_cost: number;
+  handler_reason: string;
+  handler_reference: string;
+  agent_section: string;
   source_claim_id: string;
   handler_decision: DecisionKind;
   handler_payout: number;

@@ -57,6 +57,8 @@ This runs Ruff, Pyright, pytest with at least 80% coverage, Prettier, ESLint, ts
 
 ## Verification
 
+Improvement Phase 3: Jev grading runs concurrently in the backend through one SDK call site, using a 10-second timeout and no retries. Grades/check probabilities and separate judge costs are persisted; failed grading is excluded from averages, undecided claims receive F/0, and free mode leaves every claim ungraded. Scoreboard shows grades and handler references. The no-`.env` gate passes 127 Python tests at 93.85% coverage, 38 Vitest tests at 89.16% statement coverage and 12 Playwright tests; the real Decisions SDK talks only to a local judge stand-in.
+
 Improvement Phase 2: the full gate passes 122 Python tests at 93.67% coverage, 37 Vitest tests at 89.08% statement coverage and 12 Playwright tests. All model/Auth interactions are stubs; no hosted resources have been reseeded during implementation. Existing databases need the planned explicit seed after services stop before running the changed schema; normal startup does not migrate or reset old tables.
 
 Improvement Phase 1: `npm run check` passed with `.env` absent. The dashboard suite has 32 tests at 88.58% statement coverage, and all ten Playwright tests sign in through the local Auth/JWKS stand-in. Backend tests cover signed tokens, audience/expiry, missing and invalid credentials, unknown users and Dana/Marcus sign-off permissions.

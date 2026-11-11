@@ -10,6 +10,7 @@ from backend.database import (
     connect,
     handler_decisions_table,
     held_out_claims_table,
+    judge_grades_table,
     run_claims_table,
     runs_table,
     timestamp,
@@ -168,6 +169,14 @@ def evaluation_record(run_id: int) -> dict[str, Any]:
             .all()
         )
         labels = {label["claim_id"]: label["data"] for label in label_rows}
+        grade_rows = (
+            connection.execute(
+                select(judge_grades_table).where(judge_grades_table.c.run_id == run_id)
+            )
+            .mappings()
+            .all()
+        )
+        grades = {row["claim_id"]: row for row in grade_rows}
         claims = []
         for item in items:
             copy = (
@@ -189,12 +198,27 @@ def evaluation_record(run_id: int) -> dict[str, Any]:
                 else None
             )
             score = score_answer(agent, handler)
+            grade = grades.get(item["claim_id"])
             claims.append(
                 {
                     **base_claims[item["claim_id"]],
                     "source_claim_id": item["source_claim_id"],
                     "handler_decision": handler["decision"],
                     "handler_payout": float(handler["payout"]),
+                    "handler_reason": handler["reason"],
+                    "handler_reference": handler["reference"],
+                    "agent_section": copy["policy_section"] or "",
+                    "grade": float(grade["grade"])
+                    if grade and grade["grade"] is not None
+                    else None,
+                    "letter": grade["letter"] if grade else None,
+                    "same_grounds": float(grade["same_grounds"])
+                    if grade and grade["same_grounds"] is not None
+                    else None,
+                    "same_section": float(grade["same_section"])
+                    if grade and grade["same_section"] is not None
+                    else None,
+                    "judge_cost": float(grade["judge_cost"]) if grade else 0.0,
                     "agent_decision": agent["decision"] if agent else "refer",
                     "agent_payout": float(agent["payout"]) if agent else 0.0,
                     "agent_reason": copy["reason"] or "No decision recorded",
@@ -203,7 +227,10 @@ def evaluation_record(run_id: int) -> dict[str, Any]:
             )
     count = len(claims)
     active_seconds = [claim["active_seconds"] for claim in claims]
+    graded = [claim["grade"] for claim in claims if claim["grade"] is not None]
     measures = {
+        "grade": sum(graded) / len(graded) if graded else None,
+        "judge_cost": sum(claim["judge_cost"] for claim in claims),
         "decision_accuracy": (sum(claim["decision_match"] for claim in claims) / count),
         "accuracy": sum(claim["right"] for claim in claims) / count,
         "cost_of_mistakes": sum(claim["mistake_cost"] for claim in claims),

@@ -2,7 +2,7 @@ import pytest
 from fastapi import HTTPException
 from fastapi.testclient import TestClient
 
-from backend import agent_service, auth
+from backend import agent_service, auth, judge
 from backend.main import app
 
 
@@ -37,6 +37,17 @@ def client(tmp_path, monkeypatch):
         return {"email": emails[token]}
 
     monkeypatch.setattr(auth, "decode_token", fake_decode)
+    monkeypatch.setattr(
+        judge,
+        "grade_claim",
+        lambda state: {
+            "grade": 1.51,
+            "letter": "C",
+            "same_grounds": 0.75,
+            "same_section": 0.25,
+            "judge_cost": 0.001,
+        },
+    )
     monkeypatch.setenv("VITE_SUPABASE_URL", "http://supabase.test")
     with TestClient(app, headers={"Authorization": "Bearer dana-token"}) as test_client:
         yield test_client

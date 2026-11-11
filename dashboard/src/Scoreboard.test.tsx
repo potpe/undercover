@@ -28,6 +28,8 @@ function makeEvaluation(runId = 1): EvaluationRun {
     wall_seconds: 60,
     claims: [],
     measures: {
+      grade: 1.51,
+      judge_cost: 0.001,
       decision_accuracy: 0.8,
       accuracy: 0.6,
       cost_of_mistakes: 1501,
@@ -41,6 +43,14 @@ function makeEvaluation(runId = 1): EvaluationRun {
     claim_comparisons: [
       {
         claim_id: "EVAL-1-01",
+        grade: 1.51,
+        letter: "C",
+        same_grounds: 0.75,
+        same_section: 0.25,
+        judge_cost: 0.001,
+        handler_reason: "Covered delay",
+        handler_reference: "Section 3",
+        agent_section: "Section 9",
         position: 1,
         status: "done",
         attempts: 0,
@@ -97,6 +107,18 @@ function mockApi(evaluations: EvaluationRun[] = [makeEvaluation()]) {
 afterEach(() => {
   cleanup();
   vi.unstubAllGlobals();
+});
+
+it("renders not-graded claims without inventing a grade", async () => {
+  const evaluation = makeEvaluation();
+  evaluation.measures.grade = null;
+  evaluation.claim_comparisons[0].grade = null;
+  evaluation.claim_comparisons[0].letter = null;
+  mockApi([evaluation]);
+  render(<Scoreboard onSelectClaim={vi.fn()} />);
+  expect(await screen.findByText("Average grade: Not graded")).toBeDefined();
+  fireEvent.click(screen.getByRole("button", { name: "View evaluation 1" }));
+  expect(await screen.findByText("Not graded", { exact: true })).toBeDefined();
 });
 
 it("starts an evaluation with N, set and tiny scope", async () => {

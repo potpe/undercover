@@ -295,6 +295,8 @@ class CreateEvaluationRequest(CreateRunRequest):
 
 
 class EvaluationMeasures(BaseModel):
+    grade: float | None
+    judge_cost: float
     decision_accuracy: float
     accuracy: float
     cost_of_mistakes: float
@@ -307,6 +309,14 @@ class EvaluationMeasures(BaseModel):
 
 
 class EvaluationClaim(RunClaim):
+    grade: float | None
+    letter: Literal["F", "C", "B", "A"] | None
+    same_grounds: float | None
+    same_section: float | None
+    judge_cost: float
+    handler_reason: str
+    handler_reference: str
+    agent_section: str
     source_claim_id: str
     handler_decision: DecisionKind
     handler_payout: float

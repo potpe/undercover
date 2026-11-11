@@ -26,6 +26,13 @@ function Measures({ evaluation }: Readonly<{ evaluation: EvaluationRun }>) {
         Decision accuracy: {formatPercent(measures.decision_accuracy)}
       </span>
       <span>Accuracy: {formatPercent(measures.accuracy)}</span>
+      <span>
+        Average grade:{" "}
+        {measures.grade === null
+          ? "Not graded"
+          : `${measures.grade.toFixed(2)} / 3`}
+      </span>
+      <span>Judge cost: {formatModelCost(measures.judge_cost)}</span>
       <span>Cost of mistakes: {formatMoney(measures.cost_of_mistakes)}</span>
       <span>Straight through: {formatPercent(measures.straight_through)}</span>
       <span>Model cost: {formatModelCost(measures.model_cost)}</span>
@@ -60,6 +67,7 @@ function EvaluationDetail({
               <th scope="col">Handler</th>
               <th scope="col">Agent</th>
               <th scope="col">Reason</th>
+              <th scope="col">Grade</th>
               <th scope="col">Cost and time</th>
               <th scope="col">Result</th>
             </tr>
@@ -88,7 +96,17 @@ function EvaluationDetail({
                 <td data-label="Agent">
                   {claim.agent_decision}: {formatMoney(claim.agent_payout)}
                 </td>
-                <td data-label="Reason">{claim.agent_reason}</td>
+                <td data-label="Reason">
+                  <p>{claim.agent_reason}</p>
+                  <details>
+                    <summary>Handler reference</summary>
+                    <p>{claim.handler_reason}</p>
+                    <p>{claim.handler_reference}</p>
+                  </details>
+                </td>
+                <td data-label="Grade">
+                  <JudgeGrade claim={claim} />
+                </td>
                 <td data-label="Cost and time" className="mono">
                   {formatModelCost(claim.model_cost)};{" "}
                   {formatSeconds(claim.active_seconds)}
@@ -100,6 +118,29 @@ function EvaluationDetail({
         </table>
       </div>
     </section>
+  );
+}
+
+function JudgeGrade({ claim }: Readonly<{ claim: EvaluationClaim }>) {
+  if (claim.grade === null) return <span>Not graded</span>;
+  return (
+    <div>
+      <strong>
+        {claim.letter} ({claim.grade.toFixed(2)} / 3)
+      </strong>
+      <div>
+        Same grounds:{" "}
+        {claim.same_grounds !== null && claim.same_grounds >= 0.5
+          ? "Yes"
+          : "No"}
+      </div>
+      <div>
+        Same section:{" "}
+        {claim.same_section !== null && claim.same_section >= 0.5
+          ? "Yes"
+          : "No"}
+      </div>
+    </div>
   );
 }
 
@@ -285,7 +326,8 @@ export function Scoreboard({
             </span>
           </div>
           <p className="mono">
-            {evaluation.model_name}; reasoning: {evaluation.reasoning_effort}
+            Version {evaluation.configuration_version}; {evaluation.model_name};
+            reasoning: {evaluation.reasoning_effort}
           </p>
           <Measures evaluation={evaluation} />
           <button

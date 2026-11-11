@@ -16,6 +16,7 @@ from backend.database import (
     timestamp,
     work_periods_table,
 )
+from backend.judge import grade_evaluation
 from backend.models import CreateRunRequest
 
 
@@ -527,6 +528,8 @@ def selected_summary(connection: Connection, run_id: int, error: str | None) -> 
 
 
 def finish_run(run_id: int) -> dict[str, Any]:
+    require_run(run_id)
+    grade_evaluation(run_id)
     with connect() as connection:
         exists = connection.execute(
             select(runs_table.c.run_id).where(runs_table.c.run_id == run_id)
@@ -543,6 +546,7 @@ def finish_run(run_id: int) -> dict[str, Any]:
 
 
 def stop_run(run_id: int, error: str) -> None:
+    grade_evaluation(run_id)
     with connect() as connection:
         summary = selected_summary(connection, run_id, error)
         connection.execute(

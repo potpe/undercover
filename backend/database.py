@@ -232,6 +232,17 @@ run_claims_table = Table(
     Column("error", Text),
     UniqueConstraint("run_id", "position"),
 )
+judge_grades_table = Table(
+    "judge_grades",
+    metadata,
+    Column("run_id", Integer, primary_key=True),
+    Column("claim_id", String, primary_key=True),
+    Column("grade", Numeric),
+    Column("letter", String),
+    Column("same_grounds", Numeric),
+    Column("same_section", Numeric),
+    Column("judge_cost", Numeric, nullable=False),
+)
 model_calls_table = Table(
     "model_calls",
     metadata,

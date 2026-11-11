@@ -430,6 +430,7 @@ test("the scoreboard shows an API-played evaluation and linked copy", async ({
   await expect(page.getByText("Cost of mistakes: $3,900.00")).toBeVisible();
   await expect(page.getByText("Straight through: 20%")).toBeVisible();
   await expect(page.getByText("Model cost: $0.10")).toBeVisible();
+  await expect(page.getByText("Judge cost: $0.001")).toBeVisible();
   await expect(page.getByText("Model cost per claim: $0.02")).toBeVisible();
   await expect(page.getByText("Time per claim: 0.4 s")).toBeVisible();
   await expect(page.getByText("Slowest claim: 2.0 s")).toBeVisible();
@@ -438,6 +439,9 @@ test("the scoreboard shows an API-played evaluation and linked copy", async ({
     .getByRole("button", { name: `View evaluation ${String(run.run_id)}` })
     .click();
   await expect(page.getByText("Decision miss").first()).toBeVisible();
+  await expect(page.getByText("C (1.51 / 3)")).toBeVisible();
+  await expect(page.getByText("Same grounds: Yes").first()).toBeVisible();
+  await expect(page.getByText("Same section: No").first()).toBeVisible();
   await page.getByRole("button", { name: `View claim ${copyId}` }).click();
 
   await expect(page.locator(".evaluation-copy")).toBeVisible();

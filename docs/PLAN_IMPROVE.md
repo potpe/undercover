@@ -193,15 +193,15 @@ Implement the single judge module and persist per-copy grades during run finaliz
 
 ### Success criteria
 
-- [ ] Judge construction/call tests inspect the exact model, three lab questions, handler/agent state, per-call `server_url`, 10-second timeout and disabled retries. Only `backend/judge.py` contains the alpha Decisions invocation.
-- [ ] A response with numeric score `1.51` but greatest probability on C returns grade `1.51` and letter C, not B. Same-grounds/section values remain probabilities in the API and render Yes/No at the specified threshold.
-- [ ] A completed evaluation fixture with hand-calculated grades returns their mean, separate judge cost and every claim's letter/score/checks beside all previous measures. An ungraded failed-judge claim is excluded from the mean; an all-ungraded run has `grade=null`, never zero.
-- [ ] An undecided copy receives F/0 without a judge request, while other copies are still graded. A mixed timeout/failure fixture leaves only affected claims Not graded and completes the evaluation.
-- [ ] A controlled parallel test with stubbed slow calls proves per-copy concurrency, no SDK retry and finish below 20 seconds, comfortably inside the existing 30-second caller timeout. Dispatch finalization performs no judge work.
-- [ ] With `MODEL_NAME` set, no judge client/call is made, every claim—including an undecided one—shows Not graded and average grade is null. No test contacts OpenRouter.
-- [ ] Scoreboard list/detail shows version, average grade and judge cost apart from claim-model cost; each detail row shows grade/letter and both checks with understandable Not graded states. Vitest and Playwright use the deterministic judge stand-in and retain existing copy isolation/links.
-- [ ] Seed/API tests prove both sets' stored labels retain reason/reference for backend judging and dashboard comparisons, while claim reads/tools and claim-agent responses contain neither them nor grade data.
-- [ ] `npm run check` passes with `.env` absent and both coverage thresholds at least 80%.
+- [x] Judge construction/call tests inspect the exact model, three lab questions, handler/agent state, per-call `server_url`, 10-second timeout and disabled retries. Only `backend/judge.py` contains the alpha Decisions invocation.
+- [x] A response with numeric score `1.51` but greatest probability on C returns grade `1.51` and letter C, not B. Same-grounds/section values remain probabilities in the API and render Yes/No at the specified threshold.
+- [x] A completed evaluation fixture with hand-calculated grades returns their mean, separate judge cost and every claim's letter/score/checks beside all previous measures. An ungraded failed-judge claim is excluded from the mean; an all-ungraded run has `grade=null`, never zero.
+- [x] An undecided copy receives F/0 without a judge request, while other copies are still graded. A mixed timeout/failure fixture leaves only affected claims Not graded and completes the evaluation.
+- [x] A controlled parallel test with stubbed slow calls proves per-copy concurrency, no SDK retry and finish below 20 seconds, comfortably inside the existing 30-second caller timeout. Dispatch finalization performs no judge work.
+- [x] With `MODEL_NAME` set, no judge client/call is made, every claim—including an undecided one—shows Not graded and average grade is null. No test contacts OpenRouter.
+- [x] Scoreboard list/detail shows version, average grade and judge cost apart from claim-model cost; each detail row shows grade/letter and both checks with understandable Not graded states. Vitest and Playwright use the deterministic judge stand-in and retain existing copy isolation/links.
+- [x] Seed/API tests prove both sets' stored labels retain reason/reference for backend judging and dashboard comparisons, while claim reads/tools and claim-agent responses contain neither them nor grade data.
+- [x] `npm run check` passes with `.env` absent and both coverage thresholds at least 80%.
 
 ## Phase 4: Durable improver rounds and the Improvement page
 

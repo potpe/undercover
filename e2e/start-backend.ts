@@ -23,6 +23,8 @@ const child = spawn(
       VITE_SUPABASE_URL: "http://127.0.0.1:8005",
       VITE_SUPABASE_PUBLISHABLE_KEY: "e2e-publishable-key",
       MODEL_NAME: "",
+      JUDGE_ORIGIN: "http://127.0.0.1:8006",
+      OPENROUTER_API_KEY: "e2e-not-a-real-key",
     },
     stdio: "inherit",
     shell: process.platform === "win32",

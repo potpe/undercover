@@ -8,6 +8,11 @@ export default defineConfig({
   use: { baseURL: "http://localhost:5174" },
   webServer: [
     {
+      command: "node e2e/start-judge-stub.ts",
+      url: "http://127.0.0.1:8006/health",
+      reuseExistingServer: true,
+    },
+    {
       command: "node e2e/start-auth-stub.ts",
       url: "http://127.0.0.1:8005/health",
       reuseExistingServer: true,
