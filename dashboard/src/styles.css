@@ -83,6 +83,64 @@ button:focus-visible {
   font-size: 0.8125rem;
 }
 
+.handler-session {
+  display: grid;
+  justify-items: end;
+  gap: 0.25rem;
+  font-size: 0.8125rem;
+}
+
+.handler-session .secondary-action {
+  margin-top: 0.25rem;
+}
+
+.sign-in-page {
+  display: grid;
+  min-height: 100vh;
+  padding: 2rem;
+  place-items: center;
+  background: var(--page);
+}
+
+.sign-in-panel {
+  width: min(100%, 28rem);
+  padding: 2rem;
+}
+
+.sign-in-panel .brand {
+  margin-bottom: 2rem;
+}
+
+.sign-in-panel h1 {
+  margin-bottom: 0.75rem;
+}
+
+.sign-in-panel form {
+  display: grid;
+  gap: 0.75rem;
+  margin-top: 1.5rem;
+}
+
+.sign-in-panel label {
+  font-size: 0.875rem;
+  font-weight: 700;
+}
+
+.sign-in-panel input {
+  min-height: 2.75rem;
+  padding: 0.625rem 0.75rem;
+  border: 0;
+  border-radius: 0.5rem;
+  background: var(--nav);
+  color: var(--text);
+  font: inherit;
+}
+
+.sign-in-panel input:focus-visible {
+  outline: 3px solid var(--focus);
+  outline-offset: 2px;
+}
+
 nav {
   display: flex;
   gap: 0.25rem;

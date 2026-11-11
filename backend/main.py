@@ -4,12 +4,13 @@ from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from http import HTTPStatus
 from pathlib import Path
-from typing import Any
+from typing import Annotated, Any
 
 import httpx
-from fastapi import BackgroundTasks, FastAPI, HTTPException
+from fastapi import BackgroundTasks, Depends, FastAPI, HTTPException
 
 from backend import agent_service
+from backend.auth import current_handler
 from backend.database import (
     add_activity,
     get_claim_bundle,
@@ -42,6 +43,7 @@ from backend.models import (
     EvaluationRecord,
     EvaluationRequest,
     FailureRequest,
+    Handler,
     Instructions,
     ModelCallRequest,
     PaymentRequest,
@@ -50,7 +52,6 @@ from backend.models import (
     RunRecord,
     RunRequest,
     RunResponse,
-    SignOffRequest,
     StoppedRuns,
     WorkContext,
     WorkOutcome,
@@ -129,12 +130,22 @@ def decision(claim_id: str, request: DecisionRequest) -> ClaimBundle:
     return claim(claim_id)
 
 
+@app.get("/api/me", operation_id="get_current_handler")
+def get_current_handler(
+    handler: Annotated[dict[str, Any], Depends(current_handler)],
+) -> Handler:
+    """Return the signed-in handler and their permissions."""
+    return Handler(**handler)
+
+
 @app.post("/api/claims/{claim_id}/sign-off", operation_id="sign_off_claim")
 def sign_off_claim(
-    claim_id: str, request: SignOffRequest, background_tasks: BackgroundTasks
+    claim_id: str,
+    background_tasks: BackgroundTasks,
+    handler: Annotated[dict[str, Any], Depends(current_handler)],
 ) -> ClaimBundle:
-    """Save handler sign-off and ask the agent to resume payment."""
-    sign_off(claim_id, request)
+    """Save the signed-in handler's sign-off and resume payment."""
+    sign_off(claim_id, handler["handler_id"])
     background_tasks.add_task(agent_service.notify_resume, claim_id)
     return claim(claim_id)
 
@@ -155,7 +166,10 @@ def payment(claim_id: str, request: PaymentRequest) -> ClaimBundle:
 
 @app.post("/api/claims/{claim_id}/run", operation_id="run_claim", status_code=202)
 def run_claim(
-    claim_id: str, request: RunRequest, background_tasks: BackgroundTasks
+    claim_id: str,
+    request: RunRequest,
+    background_tasks: BackgroundTasks,
+    _handler: Annotated[dict[str, Any], Depends(current_handler)],
 ) -> RunResponse:
     """Work one named claim without creating a dispatch or evaluation."""
     start_run(claim_id, request.thread_id)
@@ -166,7 +180,10 @@ def run_claim(
 
 
 @app.post("/api/dispatches", operation_id="start_dispatch", status_code=202)
-def start_dispatch(request: DispatchRequest) -> RunRecord:
+def start_dispatch(
+    request: DispatchRequest,
+    _handler: Annotated[dict[str, Any], Depends(current_handler)],
+) -> RunRecord:
     """Ask the agent service to start a dispatch with N claim agents."""
     try:
         response = agent_service.start_dispatch(request.concurrency)
@@ -183,7 +200,10 @@ def get_current_dispatch() -> RunRecord | None:
 
 
 @app.post("/api/evaluations", operation_id="start_evaluation", status_code=202)
-def start_evaluation(request: EvaluationRequest) -> RunRecord:
+def start_evaluation(
+    request: EvaluationRequest,
+    _handler: Annotated[dict[str, Any], Depends(current_handler)],
+) -> RunRecord:
     """Ask the agent service to evaluate a labelled set with N agents."""
     try:
         response = agent_service.start_evaluation(

@@ -3,17 +3,13 @@ import { formatDateTime, formatMoney } from "./format";
 
 export function DecisionSection({
   bundle,
-  handlers,
-  handlerId,
+  handler,
   busy,
-  onHandlerChange,
   onSignOff,
 }: Readonly<{
   bundle: ClaimBundle;
-  handlers: Handler[];
-  handlerId: string;
+  handler: Handler;
   busy: boolean;
-  onHandlerChange: (handlerId: string) => void;
   onSignOff: () => Promise<void>;
 }>) {
   const decision = bundle.decision;
@@ -72,32 +68,26 @@ export function DecisionSection({
               signs off.
             </p>
           </div>
-          <label htmlFor="handler">Signing handler</label>
-          <select
-            id="handler"
-            value={handlerId}
-            disabled={busy || Boolean(bundle.signed_off_by)}
-            onChange={(event) => {
-              onHandlerChange(event.target.value);
-            }}
-          >
-            <option value="">Choose a handler</option>
-            {handlers.map((handler) => (
-              <option key={handler.handler_id} value={handler.handler_id}>
-                {handler.name}
-              </option>
-            ))}
-          </select>
-          <button
-            type="button"
-            className="primary-action"
-            disabled={busy || !handlerId}
-            onClick={() => {
-              void onSignOff();
-            }}
-          >
-            {signOffLabel}
-          </button>
+          <p>
+            Signed in as <strong>{handler.name}</strong>.
+          </p>
+          {handler.can_approve_over_limit ? (
+            <button
+              type="button"
+              className="primary-action"
+              disabled={busy}
+              onClick={() => {
+                void onSignOff();
+              }}
+            >
+              {signOffLabel}
+            </button>
+          ) : (
+            <p role="note">
+              You cannot sign off this payout. Only a handler who can approve
+              over-limit payouts may release it.
+            </p>
+          )}
           <p className="fine-print">
             The pilot records payment only; no money is transferred.
           </p>

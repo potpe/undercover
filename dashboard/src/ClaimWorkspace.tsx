@@ -1,7 +1,6 @@
 import { useEffect, useState } from "react";
 import {
   getClaim,
-  listHandlers,
   runClaim,
   signOffClaim,
   type ClaimBundle,
@@ -21,11 +20,14 @@ function errorMessage(error: unknown): string {
 
 export function ClaimWorkspace({
   claimId,
+  handler,
   onBack,
-}: Readonly<{ claimId: string; onBack: () => void }>) {
+}: Readonly<{
+  claimId: string;
+  handler: Handler;
+  onBack: () => void;
+}>) {
   const [bundle, setBundle] = useState<ClaimBundle | null>(null);
-  const [handlers, setHandlers] = useState<Handler[]>([]);
-  const [handlerId, setHandlerId] = useState("");
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState(false);
   const [actionError, setActionError] = useState("");
@@ -64,22 +66,6 @@ export function ClaimWorkspace({
     };
   }, [claimId, bundle?.claim.status]);
 
-  useEffect(() => {
-    if (
-      bundle?.claim.status !== "waiting_for_sign_off" ||
-      bundle.evaluation_run_id !== null ||
-      handlers.length
-    )
-      return;
-    listHandlers()
-      .then((data) => {
-        setHandlers(data);
-      })
-      .catch((error: unknown) => {
-        setActionError(errorMessage(error));
-      });
-  }, [bundle, handlers.length]);
-
   async function handleRun() {
     setBusy(true);
     setActionError("");
@@ -98,7 +84,7 @@ export function ClaimWorkspace({
     setBusy(true);
     setActionError("");
     try {
-      setBundle(await signOffClaim(claimId, handlerId));
+      setBundle(await signOffClaim(claimId));
     } catch (error) {
       setActionError(errorMessage(error));
       setBundle(await getClaim(claimId));
@@ -131,10 +117,8 @@ export function ClaimWorkspace({
           />
           <DecisionSection
             bundle={bundle}
-            handlers={handlers}
-            handlerId={handlerId}
+            handler={handler}
             busy={busy}
-            onHandlerChange={setHandlerId}
             onSignOff={handleSignOff}
           />
           <ActivityPanel

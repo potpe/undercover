@@ -1,17 +1,23 @@
 import { useEffect, useState } from "react";
+import type { Session } from "@supabase/supabase-js";
 import {
   getCurrentDispatch,
+  getCurrentHandler,
   getInstructions,
   listClaims,
+  setAccessToken,
   startDispatch,
   type DispatchRun,
   type ClaimSummary,
+  type Handler,
 } from "./api";
 import { ClaimWorkspace } from "./ClaimWorkspace";
 import { formatClaimType, formatMoney } from "./format";
 import { RunPanel } from "./RunPanel";
 import { Scoreboard } from "./Scoreboard";
+import { SignIn } from "./SignIn";
 import { StatusBadge } from "./StatusBadge";
+import { supabase } from "./supabase";
 
 type View = "queue" | "scoreboard" | "instructions";
 
@@ -213,6 +219,71 @@ function InstructionsView() {
 export function App() {
   const [view, setView] = useState<View>("queue");
   const [selectedClaim, setSelectedClaim] = useState<string | null>(null);
+  const [session, setSession] = useState<Session | null | undefined>(undefined);
+  const [handler, setHandler] = useState<Handler | null>(null);
+  const [authError, setAuthError] = useState("");
+
+  useEffect(() => {
+    let active = true;
+    void supabase.auth
+      .getSession()
+      .then(({ data }) => {
+        if (active) setSession(data.session);
+      })
+      .catch(() => {
+        if (active) setSession(null);
+      });
+    const {
+      data: { subscription },
+    } = supabase.auth.onAuthStateChange((_event, nextSession) => {
+      setHandler(null);
+      setAuthError("");
+      setSession(nextSession);
+    });
+    return () => {
+      active = false;
+      subscription.unsubscribe();
+    };
+  }, []);
+
+  useEffect(() => {
+    setAccessToken(session?.access_token ?? null);
+    if (!session) return;
+    let active = true;
+    getCurrentHandler()
+      .then((current) => {
+        if (active) setHandler(current);
+      })
+      .catch((error: unknown) => {
+        if (active)
+          setAuthError(
+            error instanceof Error
+              ? error.message
+              : "Could not verify your handler account.",
+          );
+      });
+    return () => {
+      active = false;
+    };
+  }, [session]);
+
+  if (session === undefined) return <p role="status">Checking your sign-in…</p>;
+  if (!session) return <SignIn onSignedIn={setSession} />;
+  if (authError)
+    return (
+      <p role="alert">
+        {authError} Sign out and try another handler account.
+        <button
+          type="button"
+          onClick={() => {
+            void supabase.auth.signOut();
+          }}
+        >
+          Sign out
+        </button>
+      </p>
+    );
+  if (!handler) return <p role="status">Loading your handler account…</p>;
 
   let mainContent = <QueueView onSelect={setSelectedClaim} />;
   if (selectedClaim) {
@@ -220,6 +291,7 @@ export function App() {
       <ClaimWorkspace
         key={selectedClaim}
         claimId={selectedClaim}
+        handler={handler}
         onBack={() => {
           setSelectedClaim(null);
         }}
@@ -246,7 +318,7 @@ export function App() {
           </span>
           <div>
             <span className="brand-name">UnderCover</span>
-            <span className="brand-product">Claims pilot</span>
+            <span className="brand-product">Claims platform</span>
           </div>
         </div>
         <nav aria-label="Main navigation">
@@ -283,6 +355,19 @@ export function App() {
             Agent instructions
           </button>
         </nav>
+        <div className="handler-session">
+          <span>{handler.name}</span>
+          <span className="muted">{handler.email}</span>
+          <button
+            type="button"
+            className="secondary-action"
+            onClick={() => {
+              void supabase.auth.signOut();
+            }}
+          >
+            Sign out
+          </button>
+        </div>
       </header>
       <main>{mainContent}</main>
       <footer>Decisions grounded in the policy.</footer>

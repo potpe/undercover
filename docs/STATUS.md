@@ -1,12 +1,12 @@
 # Status
 
-The swarm and scoreboard implementation is complete. Offline checks pass; hosted acceptance has remaining provider/connection limitations documented below.
+The swarm and scoreboard implementation is complete. Improvement Phase 1 adds Supabase password sign-in, verified handler permissions and identity-based sign-off; later improvement phases remain in progress. Offline checks pass; hosted acceptance has remaining provider/connection limitations documented below.
 
 - `backend/`: FastAPI and SQLAlchemy Core on SQLite offline or Supabase Postgres. APIs cover claims, document reads, deterministic payouts, dispatches, evaluations, usage/time ledgers, decisions, sign-off, payment and record-built summaries/scores. The backend enforces the $1,000 sign-off rule and idempotent writes. Handler sources and decisions are backend-only.
 - `agent/`: a synchronous durable claim graph plus a model-free LangGraph dispatcher using `Send`, N-way concurrency and targeted retries. Claim threads and attempts survive stopped runs. A process-wide synchronous pool caps checkpoint connections at four with a separate saver per claim. Langfuse keeps claim/thread sessions and adds run tags.
 - `agent/service.py`: a separate FastAPI service on port 8002 starts dispatches/evaluations, works named claims and resumes sign-offs. One non-blocking slot prevents concurrent runs. Startup marks stale runs stopped and recovers saved sign-offs. `uv run -m agent CLM-1001` works one claim without a run; bare CLI queue execution is removed.
-- `dashboard/`: the queue starts N=1–25 dispatches (default 3), with claim states/attempts, record-built summaries and model/active/wall time. Scoreboard starts whole/tiny evaluations, lists newest first with every measure, and links handler/agent comparisons to isolated copy pages with no run/sign-off controls. Instructions show only the claim agent.
-- `e2e/`: ten Playwright tests cover queue, instructions, claim work/decisions, sign-off notification, dispatch summaries, N payloads, evaluation payloads and an API-played scoreboard evaluation. Tests use isolated SQLite and the port-8003 stand-in, never hosted services or models.
+- `dashboard/`: every page requires a Supabase Auth session, and the header shows the signed-in handler with sign-out. The queue starts N=1–25 dispatches (default 3), with claim states/attempts, record-built summaries and model/active/wall time. Scoreboard starts whole/tiny evaluations, lists newest first with every measure, and links handler/agent comparisons to isolated copy pages with no run/sign-off controls. Instructions show only the claim agent. Held payouts use the signed-in identity; handlers without over-limit permission see why they cannot sign off.
+- `e2e/`: ten Playwright tests sign in through a local asymmetric-key Supabase Auth stand-in on port 8005. They cover queue, instructions, claim work/decisions, sign-off notification, dispatch summaries, N payloads, evaluation payloads and an API-played scoreboard evaluation. Tests use isolated SQLite and the port-8003 agent stand-in, never hosted services or models.
 
 ## Set up
 
@@ -15,7 +15,7 @@ uv sync
 npm install
 ```
 
-For hosted/live work, set `DATABASE_URL`, `OPENROUTER_API_KEY`, `LANGFUSE_SECRET_KEY`, `LANGFUSE_PUBLIC_KEY` and `LANGFUSE_BASE_URL` in `.env`. `UNDERCOVER_AGENT` is optional and defaults to `http://127.0.0.1:8002`.
+For hosted/live work, set `DATABASE_URL`, `OPENROUTER_API_KEY`, `LANGFUSE_SECRET_KEY`, `LANGFUSE_PUBLIC_KEY`, `LANGFUSE_BASE_URL`, `VITE_SUPABASE_URL`, `VITE_SUPABASE_PUBLISHABLE_KEY` and `HANDLER_PASSWORD` in `.env`. The Supabase project needs the three handler users with sign-up disabled and asymmetric JWT signing keys; no Supabase secret is used. `UNDERCOVER_AGENT` is optional and defaults to `http://127.0.0.1:8002`.
 
 The default model is `openai/gpt-6-luna` with low reasoning. `MODEL_NAME` overrides it with no reasoning effort, recorded as `none`. Tests do not read `.env` and need no hosted service.
 
@@ -55,7 +55,9 @@ This runs Ruff, Pyright, pytest with at least 80% coverage, Prettier, ESLint, ts
 
 ## Verification
 
-Final offline gate: with `.env` absent, `npm run check` passed 102 Python tests at 93.50% coverage, 28 Vitest tests at 90.14% statement coverage and ten Playwright tests without hosted/model calls. Additional regressions cover atomic pool initialization, named-thread persistence, current-run usage after resume, startup cleanup ordering and terminal evaluation cleanup. Playwright MCP review found no console errors or horizontal overflow at desktop/mobile sizes across dispatch, Scoreboard, evaluation copy and instructions.
+Improvement Phase 1: `npm run check` passed with `.env` absent. The dashboard suite has 32 tests at 88.58% statement coverage, and all ten Playwright tests sign in through the local Auth/JWKS stand-in. Backend tests cover signed tokens, audience/expiry, missing and invalid credentials, unknown users and Dana/Marcus sign-off permissions.
+
+Final swarm offline gate: with `.env` absent, `npm run check` passed 102 Python tests at 93.50% coverage, 28 Vitest tests at 90.14% statement coverage and ten Playwright tests without hosted/model calls. Additional regressions cover atomic pool initialization, named-thread persistence, current-run usage after resume, startup cleanup ordering and terminal evaluation cleanup. Playwright MCP review found no console errors or horizontal overflow at desktop/mobile sizes across dispatch, Scoreboard, evaluation copy and instructions.
 
 Live verification used one Supabase seed and default Luna/low. The stopped N=3 run became `stopped` with its three interrupted claims' threads and zero attempts preserved. The subsequent N=25 work completed its remaining dispatch with a record-built summary in 39.13 seconds against 187.83 seconds of accumulated claim work. Provider in-flight-budget responses and session-pooler pressure caused real retries/handoffs; a killed N=3 claim has no final work period, so a like-for-like timing comparison is unavailable. The backend pool was reduced to two connections to leave headroom, while the claim checkpoint pool remains capped at four. Observed `postgres` connection counts ranged from 10 to 17; the 17-connection peak and associated failures mean the hosted connection criterion remains unchecked.
 

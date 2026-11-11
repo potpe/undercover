@@ -1,7 +1,8 @@
 import pytest
+from fastapi import HTTPException
 from fastapi.testclient import TestClient
 
-from backend import agent_service
+from backend import agent_service, auth
 from backend.main import app
 
 
@@ -23,5 +24,19 @@ def client(tmp_path, monkeypatch):
             return None
 
     monkeypatch.setattr(agent_service, "agent_post", lambda *args, **kwargs: Accepted())
-    with TestClient(app) as test_client:
+
+    def fake_decode(token, keys=None):
+        emails = {
+            "dana-token": "dana.whitfield@undercover.example",
+            "marcus-token": "marcus.oyelaran@undercover.example",
+            "priya-token": "priya.raman@undercover.example",
+            "stranger-token": "stranger@undercover.example",
+        }
+        if token not in emails:
+            raise HTTPException(status_code=401, detail="Sign in to continue")
+        return {"email": emails[token]}
+
+    monkeypatch.setattr(auth, "decode_token", fake_decode)
+    monkeypatch.setenv("VITE_SUPABASE_URL", "http://supabase.test")
+    with TestClient(app, headers={"Authorization": "Bearer dana-token"}) as test_client:
         yield test_client

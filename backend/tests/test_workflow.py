@@ -1,8 +1,8 @@
 import pytest
-from sqlalchemy import select, update
+from sqlalchemy import select
 from sqlalchemy.dialects import postgresql
 
-from backend.database import claims_table, connect, handlers_table
+from backend.database import claims_table
 
 
 def decide(client, claim_id="CLM-1001", decision="approve", payout=420.0):
@@ -96,27 +96,13 @@ def test_payment_must_equal_the_approved_payout(client):
     assert client.get("/api/claims/CLM-1001").json()["paid_amount"] is None
 
 
-def test_unknown_and_ineligible_handlers_cannot_sign_off(client):
+def test_ineligible_signed_in_handler_cannot_sign_off(client):
     decide(client, claim_id="CLM-1003", payout=3750.0)
-    unknown = client.post(
-        "/api/claims/CLM-1003/sign-off", json={"handler_id": "HND-99"}
-    )
-    assert unknown.status_code == 404
+    client.headers["Authorization"] = "Bearer marcus-token"
 
-    with connect() as connection:
-        handler = connection.execute(
-            select(handlers_table.c.data).where(handlers_table.c.handler_id == "HND-02")
-        ).scalar_one()
-        handler["can_approve_over_limit"] = False
-        connection.execute(
-            update(handlers_table)
-            .where(handlers_table.c.handler_id == "HND-02")
-            .values(data=handler)
-        )
-    ineligible = client.post(
-        "/api/claims/CLM-1003/sign-off", json={"handler_id": "HND-02"}
-    )
-    assert ineligible.status_code == 409
+    ineligible = client.post("/api/claims/CLM-1003/sign-off")
+
+    assert ineligible.status_code == 403
     assert ineligible.json() == {"detail": "Handler cannot approve over-limit payouts"}
     assert client.get("/api/claims/CLM-1003").json()["signed_off_by"] is None
 

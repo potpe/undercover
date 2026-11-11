@@ -1,4 +1,9 @@
 import { expect, test } from "@playwright/test";
+import { signIn } from "./auth";
+
+test.beforeEach(async ({ page }) => {
+  await signIn(page);
+});
 
 test("the queue shows the 25 pilot claims", async ({ page }) => {
   await page.goto("/");
@@ -146,7 +151,6 @@ test("handler sign-off reaches the agent service without direct payment", async 
   await expect(
     page.getByText("Payment recorded: $3,750.00", { exact: true }),
   ).toHaveCount(0);
-  await page.getByLabel("Signing handler").selectOption("HND-01");
   await page.getByRole("button", { name: "Sign off payout" }).click();
 
   await expect(page.locator(".status-in_progress")).toHaveText("In progress");

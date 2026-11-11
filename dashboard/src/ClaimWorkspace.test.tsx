@@ -1,13 +1,15 @@
-import {
-  act,
-  cleanup,
-  fireEvent,
-  render,
-  screen,
-} from "@testing-library/react";
+import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, expect, it, vi } from "vitest";
-import type { ClaimBundle, ClaimStatus, DecisionKind } from "./api";
+import type { ClaimBundle, ClaimStatus, DecisionKind, Handler } from "./api";
 import { ClaimWorkspace } from "./ClaimWorkspace";
+
+const handler: Handler = {
+  handler_id: "HND-01",
+  name: "Dana Whitfield",
+  role: "Senior Claims Handler",
+  email: "dana.whitfield@undercover.example",
+  can_approve_over_limit: true,
+};
 
 const activity = [
   { id: 1, message: "Agent run started", created_at: "2026-11-03T12:00:00Z" },
@@ -191,7 +193,9 @@ afterEach(() => {
 it("shows the full claim, policy, customer history and activity", async () => {
   mockDetail(makeBundle());
   const onBack = vi.fn();
-  render(<ClaimWorkspace claimId="CLM-1001" onBack={onBack} />);
+  render(
+    <ClaimWorkspace claimId="CLM-1001" handler={handler} onBack={onBack} />,
+  );
 
   expect(
     await screen.findByRole("heading", {
@@ -248,7 +252,9 @@ it("starts one run and polls until the decision is visible", async () => {
     return Promise.resolve(response({ detail: "Unexpected request" }, 500));
   });
   vi.stubGlobal("fetch", fetchMock);
-  render(<ClaimWorkspace claimId="CLM-1001" onBack={vi.fn()} />);
+  render(
+    <ClaimWorkspace claimId="CLM-1001" handler={handler} onBack={vi.fn()} />,
+  );
   const runButton = await screen.findByRole("button", { name: "Run agent" });
 
   fireEvent.click(runButton);
@@ -271,7 +277,9 @@ it.each(["decline", "refer"] as const)(
   "shows a %s decision without a payment action",
   async (kind) => {
     mockDetail(makeBundle("decided", kind, 0));
-    render(<ClaimWorkspace claimId="CLM-1001" onBack={vi.fn()} />);
+    render(
+      <ClaimWorkspace claimId="CLM-1001" handler={handler} onBack={vi.fn()} />,
+    );
 
     expect(await screen.findByText("Agent decision")).toBeDefined();
     expect(
@@ -328,15 +336,11 @@ it("signs off and polls until the agent records an over-limit payment", async ()
       return Promise.resolve(response({ detail: "Unexpected request" }, 500));
     },
   );
-  render(<ClaimWorkspace claimId="CLM-1001" onBack={vi.fn()} />);
+  render(
+    <ClaimWorkspace claimId="CLM-1001" handler={handler} onBack={vi.fn()} />,
+  );
 
-  const selector = await screen.findByLabelText("Signing handler");
-  await screen.findByRole("option", { name: "Dana Whitfield" });
-  act(() => {
-    fireEvent.change(selector, { target: { value: "HND-01" } });
-  });
-  expect(selector).toHaveProperty("value", "HND-01");
-  const signOffButton = screen.getByRole("button", {
+  const signOffButton = await screen.findByRole("button", {
     name: "Sign off payout",
   });
   expect(signOffButton).toHaveProperty("disabled", false);
@@ -383,14 +387,13 @@ it("shows a rejected sign-off and keeps the decision visible", async () => {
       return Promise.resolve(response({ detail: "Unexpected request" }, 500));
     },
   );
-  render(<ClaimWorkspace claimId="CLM-1001" onBack={vi.fn()} />);
+  render(
+    <ClaimWorkspace claimId="CLM-1001" handler={handler} onBack={vi.fn()} />,
+  );
 
-  const selector = await screen.findByLabelText("Signing handler");
-  await screen.findByRole("option", { name: "Dana Whitfield" });
-  act(() => {
-    fireEvent.change(selector, { target: { value: "HND-01" } });
-  });
-  fireEvent.click(screen.getByRole("button", { name: "Sign off payout" }));
+  fireEvent.click(
+    await screen.findByRole("button", { name: "Sign off payout" }),
+  );
 
   expect(await screen.findByRole("alert")).toHaveProperty(
     "textContent",
@@ -406,7 +409,9 @@ it("shows a rejected sign-off and keeps the decision visible", async () => {
 
 it("shows a claim loading failure", async () => {
   vi.stubGlobal("fetch", vi.fn().mockRejectedValue(new Error("offline")));
-  render(<ClaimWorkspace claimId="CLM-1001" onBack={vi.fn()} />);
+  render(
+    <ClaimWorkspace claimId="CLM-1001" handler={handler} onBack={vi.fn()} />,
+  );
 
   expect(await screen.findByRole("alert")).toHaveProperty(
     "textContent",
@@ -420,11 +425,35 @@ it("identifies an evaluation copy and hides run and sign-off controls", async ()
     evaluation_run_id: 7,
   };
   mockDetail(held);
-  render(<ClaimWorkspace claimId="CLM-1001" onBack={vi.fn()} />);
+  render(
+    <ClaimWorkspace claimId="CLM-1001" handler={handler} onBack={vi.fn()} />,
+  );
 
   expect(
     await screen.findByText("Evaluation 7", { exact: false }),
   ).toBeDefined();
   expect(screen.queryByLabelText("Signing handler")).toBeNull();
   expect(screen.queryByRole("button", { name: "Run agent" })).toBeNull();
+});
+
+it("explains when the signed-in handler cannot approve the held payout", async () => {
+  mockDetail(makeBundle("waiting_for_sign_off", "approve", 3750));
+  render(
+    <ClaimWorkspace
+      claimId="CLM-1001"
+      handler={{
+        ...handler,
+        name: "Marcus Oyelaran",
+        can_approve_over_limit: false,
+      }}
+      onBack={vi.fn()}
+    />,
+  );
+
+  expect(
+    await screen.findByText(
+      "You cannot sign off this payout. Only a handler who can approve over-limit payouts may release it.",
+    ),
+  ).toBeDefined();
+  expect(screen.queryByRole("button", { name: "Sign off payout" })).toBeNull();
 });

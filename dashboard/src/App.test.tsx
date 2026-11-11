@@ -5,9 +5,34 @@ import {
   screen,
   waitFor,
 } from "@testing-library/react";
-import { afterEach, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, expect, it, vi } from "vitest";
+import type { Session } from "@supabase/supabase-js";
 import { App } from "./App";
-import type { ClaimSummary, DispatchRun } from "./api";
+import type { ClaimSummary, DispatchRun, Handler } from "./api";
+
+const auth = vi.hoisted(() => ({
+  getSession: vi.fn(),
+  onAuthStateChange: vi.fn(),
+  signInWithPassword: vi.fn(),
+  signOut: vi.fn(),
+}));
+
+vi.mock("./supabase", () => ({
+  supabase: { auth },
+}));
+
+const session = {
+  access_token: "dana-token",
+  user: { email: "dana.whitfield@undercover.example" },
+} as unknown as Session;
+
+const currentHandler: Handler = {
+  handler_id: "HND-01",
+  name: "Dana Whitfield",
+  role: "Senior Claims Handler",
+  email: "dana.whitfield@undercover.example",
+  can_approve_over_limit: true,
+};
 
 const claims: ClaimSummary[] = [
   {
@@ -150,6 +175,7 @@ function mockApi(currentRun: DispatchRun | null = null) {
     if (url === "/api/claims") return Promise.resolve(response(claims));
     if (url === "/api/dispatches/current")
       return Promise.resolve(response(currentRun));
+    if (url === "/api/me") return Promise.resolve(response(currentHandler));
     if (url === "/api/agent/instructions")
       return Promise.resolve(response({ claim }));
     return Promise.resolve(response({ detail: "Not found" }, 404));
@@ -158,8 +184,17 @@ function mockApi(currentRun: DispatchRun | null = null) {
   return { fetchMock, claim };
 }
 
+beforeEach(() => {
+  auth.getSession.mockResolvedValue({ data: { session } });
+  auth.onAuthStateChange.mockReturnValue({
+    data: { subscription: { unsubscribe: vi.fn() } },
+  });
+  auth.signOut.mockResolvedValue({ error: null });
+});
+
 afterEach(() => {
   cleanup();
+  vi.clearAllMocks();
   vi.unstubAllGlobals();
 });
 
@@ -196,7 +231,14 @@ it("does not refetch the queue on an unrelated rerender", async () => {
 });
 
 it("shows a queue loading failure", async () => {
-  vi.stubGlobal("fetch", vi.fn().mockRejectedValue(new Error("offline")));
+  vi.stubGlobal(
+    "fetch",
+    vi.fn((input: RequestInfo | URL) => {
+      if (requestUrl(input) === "/api/me")
+        return Promise.resolve(response(currentHandler));
+      return Promise.reject(new Error("offline"));
+    }),
+  );
   render(<App />);
 
   expect(await screen.findByRole("alert")).toHaveProperty(
@@ -223,6 +265,7 @@ it("shows an instructions loading failure", async () => {
     "fetch",
     vi.fn((input: RequestInfo | URL) => {
       const url = requestUrl(input);
+      if (url === "/api/me") return Promise.resolve(response(currentHandler));
       if (url === "/api/claims") return Promise.resolve(response(claims));
       if (url === "/api/dispatches/current")
         return Promise.resolve(response(null));
@@ -297,6 +340,7 @@ it("starts one dispatch with N and stops polling after completion", async () => 
   let started = false;
   const fetchMock = vi.fn((input: RequestInfo | URL, init?: RequestInit) => {
     const url = requestUrl(input);
+    if (url === "/api/me") return Promise.resolve(response(currentHandler));
     if (url === "/api/claims") return Promise.resolve(response(claims));
     if (url === "/api/dispatches" && init?.method === "POST") {
       started = true;
@@ -327,6 +371,9 @@ it("starts one dispatch with N and stops polling after completion", async () => 
   expect(JSON.parse(body) as { concurrency: unknown }).toEqual({
     concurrency: 5,
   });
+  expect(new Headers(post?.[1]?.headers).get("Authorization")).toBe(
+    "Bearer dana-token",
+  );
   await waitFor(() => {
     expect(
       screen.getByText("2 approved, 1 declined, 1 referred."),
@@ -346,6 +393,7 @@ it("starts one dispatch with N and stops polling after completion", async () => 
 it("shows an offline agent service without creating a dispatch", async () => {
   const fetchMock = vi.fn((input: RequestInfo | URL, init?: RequestInit) => {
     const url = requestUrl(input);
+    if (url === "/api/me") return Promise.resolve(response(currentHandler));
     if (url === "/api/claims") return Promise.resolve(response(claims));
     if (url === "/api/dispatches/current")
       return Promise.resolve(response(null));
@@ -369,6 +417,7 @@ it("shows an offline agent service without creating a dispatch", async () => {
 it("shows a second-start conflict", async () => {
   const fetchMock = vi.fn((input: RequestInfo | URL, init?: RequestInit) => {
     const url = requestUrl(input);
+    if (url === "/api/me") return Promise.resolve(response(currentHandler));
     if (url === "/api/claims") return Promise.resolve(response(claims));
     if (url === "/api/dispatches/current")
       return Promise.resolve(response(null));
@@ -397,4 +446,82 @@ it("disables starting while a dispatch is active", async () => {
   expect(
     await screen.findByRole("button", { name: "Start dispatch" }),
   ).toHaveProperty("disabled", true);
+});
+
+it("signs in with email and password without offering sign-up", async () => {
+  let listener: ((event: string, value: Session | null) => void) | undefined;
+  auth.getSession.mockResolvedValue({ data: { session: null } });
+  auth.onAuthStateChange.mockImplementation((callback) => {
+    listener = callback as typeof listener;
+    return { data: { subscription: { unsubscribe: vi.fn() } } };
+  });
+  auth.signInWithPassword.mockImplementation(() => {
+    listener?.("SIGNED_IN", session);
+    return Promise.resolve({ data: { session }, error: null });
+  });
+  mockApi();
+  render(<App />);
+
+  expect(
+    await screen.findByRole("heading", { name: "Sign in to UnderCover" }),
+  ).toBeDefined();
+  expect(screen.queryByRole("button", { name: "Sign up" })).toBeNull();
+  fireEvent.change(screen.getByLabelText("Email address"), {
+    target: { value: "dana.whitfield@undercover.example" },
+  });
+  fireEvent.change(screen.getByLabelText("Password"), {
+    target: { value: "not-a-real-password" },
+  });
+  fireEvent.click(screen.getByRole("button", { name: "Sign in" }));
+
+  expect(await screen.findByText("Maya Patel")).toBeDefined();
+  expect(auth.signInWithPassword).toHaveBeenCalledWith({
+    email: "dana.whitfield@undercover.example",
+    password: "not-a-real-password",
+  });
+  expect(screen.getByText("Dana Whitfield")).toBeDefined();
+});
+
+it("signs out and returns to the sign-in page", async () => {
+  let listener: ((event: string, value: Session | null) => void) | undefined;
+  auth.onAuthStateChange.mockImplementation((callback) => {
+    listener = callback as typeof listener;
+    return { data: { subscription: { unsubscribe: vi.fn() } } };
+  });
+  auth.signOut.mockImplementation(() => {
+    listener?.("SIGNED_OUT", null);
+    return Promise.resolve({ error: null });
+  });
+  mockApi();
+  render(<App />);
+  await screen.findByText("Maya Patel");
+
+  fireEvent.click(screen.getByRole("button", { name: "Sign out" }));
+
+  expect(
+    await screen.findByRole("heading", { name: "Sign in to UnderCover" }),
+  ).toBeDefined();
+});
+
+it("shows a sign-in failure without loading protected pages", async () => {
+  auth.getSession.mockResolvedValue({ data: { session: null } });
+  auth.signInWithPassword.mockResolvedValue({
+    data: { session: null },
+    error: new Error("Invalid email or password"),
+  });
+  render(<App />);
+
+  fireEvent.change(await screen.findByLabelText("Email address"), {
+    target: { value: "dana.whitfield@undercover.example" },
+  });
+  fireEvent.change(screen.getByLabelText("Password"), {
+    target: { value: "wrong" },
+  });
+  fireEvent.click(screen.getByRole("button", { name: "Sign in" }));
+
+  expect(await screen.findByRole("alert")).toHaveProperty(
+    "textContent",
+    "Invalid email or password",
+  );
+  expect(screen.queryByRole("navigation")).toBeNull();
 });

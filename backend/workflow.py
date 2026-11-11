@@ -11,7 +11,7 @@ from backend.database import (
     settings_table,
     timestamp,
 )
-from backend.models import DecisionRequest, PaymentRequest, SignOffRequest
+from backend.models import DecisionRequest, PaymentRequest
 
 
 def money(amount: float) -> str:
@@ -100,20 +100,25 @@ def record_decision(claim_id: str, request: DecisionRequest) -> None:
         )
 
 
-def sign_off(claim_id: str, request: SignOffRequest) -> None:
+def sign_off(claim_id: str, handler_id: str) -> None:
     with connect() as connection:
         row = claim_row(connection, claim_id)
         if row["evaluation_run_id"] is not None:
             reject(connection, claim_id, "Evaluation claims cannot be signed off")
         handler = connection.execute(
             select(handlers_table.c.data).where(
-                handlers_table.c.handler_id == request.handler_id
+                handlers_table.c.handler_id == handler_id
             )
         ).scalar_one_or_none()
         if handler is None:
             reject(connection, claim_id, "Handler not found", 404)
         if not handler["can_approve_over_limit"]:
-            reject(connection, claim_id, "Handler cannot approve over-limit payouts")
+            reject(
+                connection,
+                claim_id,
+                "Handler cannot approve over-limit payouts",
+                status_code=403,
+            )
         if row["decision"] != "approve" or float(row["payout"]) <= approval_limit(
             connection
         ):
@@ -126,7 +131,7 @@ def sign_off(claim_id: str, request: SignOffRequest) -> None:
             update(claims_table)
             .where(claims_table.c.claim_id == claim_id)
             .values(
-                signed_off_by=request.handler_id,
+                signed_off_by=handler_id,
                 signed_off_at=timestamp(),
                 status="in_progress",
             )

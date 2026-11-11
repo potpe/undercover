@@ -77,8 +77,12 @@ class PaymentRequest(BaseModel):
     amount: float = Field(gt=0)
 
 
-class SignOffRequest(BaseModel):
-    handler_id: str = Field(min_length=1)
+class Handler(BaseModel):
+    handler_id: str
+    name: str
+    role: str
+    email: str
+    can_approve_over_limit: bool
 
 
 class RunRequest(BaseModel):

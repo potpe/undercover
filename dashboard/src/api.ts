@@ -222,8 +222,20 @@ export interface Handler {
   can_approve_over_limit: boolean;
 }
 
+let accessToken: string | null = null;
+
+export function setAccessToken(token: string | null) {
+  accessToken = token;
+}
+
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
-  const response = await fetch(path, init);
+  let requestInit = init;
+  if (init) {
+    const headers = new Headers(init.headers);
+    if (accessToken) headers.set("Authorization", `Bearer ${accessToken}`);
+    requestInit = { ...init, headers };
+  }
+  const response = await fetch(path, requestInit);
   if (!response.ok) {
     const body = (await response.json()) as { detail?: unknown };
     const detail = typeof body.detail === "string" ? body.detail : null;
@@ -282,8 +294,8 @@ export function startEvaluation(
   });
 }
 
-export function listHandlers(): Promise<Handler[]> {
-  return request<Handler[]>("/api/handlers");
+export function getCurrentHandler(): Promise<Handler> {
+  return request<Handler>("/api/me", { headers: {} });
 }
 
 export function runClaim(
@@ -293,9 +305,8 @@ export function runClaim(
   return postJson(`/api/claims/${claimId}/run`, { thread_id: threadId });
 }
 
-export function signOffClaim(
-  claimId: string,
-  handlerId: string,
-): Promise<ClaimBundle> {
-  return postJson(`/api/claims/${claimId}/sign-off`, { handler_id: handlerId });
+export function signOffClaim(claimId: string): Promise<ClaimBundle> {
+  return request<ClaimBundle>(`/api/claims/${claimId}/sign-off`, {
+    method: "POST",
+  });
 }
