@@ -285,6 +285,7 @@ tbody tr + tr {
 }
 
 .money {
+  text-align: right;
   font-size: 0.8125rem;
   white-space: nowrap;
 }
@@ -1031,7 +1032,7 @@ footer {
 }
 
 @media (prefers-color-scheme: dark) {
-  :root {
+  :root:not([data-theme="light"]) {
     color-scheme: dark;
     --page: #04232e;
     --panel: #000000;
@@ -1110,6 +1111,77 @@ footer {
   [role="alert"] {
     color: #ff9ab8;
   }
+}
+
+:root[data-theme="dark"] {
+  color-scheme: dark;
+  --page: #04232e;
+  --panel: #000000;
+  --text: #cdd8db;
+  --muted: #9eb2b9;
+  --nav: #0b303c;
+  --focus: #5cc9e6;
+}
+
+.settings-fields {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(14rem, 1fr));
+  gap: 1.5rem;
+  border: 0;
+  padding: 1rem 0;
+}
+
+.settings-fields fieldset {
+  border: 0;
+  padding: 0;
+  display: grid;
+  gap: 0.75rem;
+}
+
+.settings-fields label {
+  display: grid;
+  gap: 0.5rem;
+  align-content: start;
+}
+
+.settings-fields input,
+.detail-section select {
+  padding: 0.75rem;
+  border-radius: 0.5rem;
+  border: 1px solid var(--muted);
+  background: var(--panel);
+  color: var(--text);
+  font: inherit;
+}
+
+.configuration-text,
+.diff-view {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  line-height: 1.6;
+}
+
+.diff-added {
+  background: #d5f5e9;
+  color: #075e47;
+}
+
+.diff-removed {
+  background: #f8dce5;
+  color: #8f1741;
+}
+
+.confirmation-dialog {
+  max-width: min(32rem, 90vw);
+  padding: 2rem;
+  border: 0;
+  border-radius: 1rem;
+  background: var(--panel);
+  color: var(--text);
+}
+
+.confirmation-dialog::backdrop {
+  background: rgb(4 35 46 / 65%);
 }
 
 .scoreboard-layout {

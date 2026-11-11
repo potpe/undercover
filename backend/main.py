@@ -3,7 +3,6 @@
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from http import HTTPStatus
-from pathlib import Path
 from typing import Annotated, Any
 
 import httpx
@@ -11,6 +10,13 @@ from fastapi import BackgroundTasks, Depends, FastAPI, HTTPException
 
 from backend import agent_service
 from backend.auth import current_handler
+from backend.configurations import (
+    agent_configuration,
+    current_recipe,
+    get_configuration,
+    list_configurations,
+    list_recipes,
+)
 from backend.database import (
     add_activity,
     get_claim_bundle,
@@ -27,11 +33,14 @@ from backend.evaluations import (
     evaluation_record,
     list_evaluations,
 )
+from backend.improvement import list_rounds
 from backend.models import (
     ActivityRequest,
     ClaimBundle,
     ClaimSummary,
     CompleteWorkRequest,
+    ConfigurationHistory,
+    ConfigurationVersion,
     CreateEvaluationRequest,
     CreateRunRequest,
     DecisionRequest,
@@ -49,9 +58,14 @@ from backend.models import (
     PaymentRequest,
     PayoutRequest,
     PayoutResponse,
+    PlatformSettings,
+    RecipeHistory,
+    RoundRecord,
     RunRecord,
     RunRequest,
     RunResponse,
+    SettingChange,
+    SettingsUpdate,
     StoppedRuns,
     WorkContext,
     WorkOutcome,
@@ -71,6 +85,7 @@ from backend.runs import (
     stop_active_runs,
     stop_run,
 )
+from backend.settings import get_settings, list_setting_changes, update_settings
 from backend.workflow import record_decision, record_payment, sign_off, start_run
 
 
@@ -100,6 +115,93 @@ def service_error(error: httpx.HTTPError) -> HTTPException:
 def health() -> dict[str, str]:
     """Check that the backend is running."""
     return {"status": "ok"}
+
+
+@app.get("/api/configuration", operation_id="list_configuration_versions")
+def configuration_history(
+    _handler: Annotated[dict[str, Any], Depends(current_handler)],
+) -> ConfigurationHistory:
+    """List claim configuration versions and their diffs."""
+    return ConfigurationHistory(**list_configurations())
+
+
+@app.get("/api/configuration/{version}", operation_id="get_configuration_version")
+def configuration_version(
+    version: int,
+    _handler: Annotated[dict[str, Any], Depends(current_handler)],
+) -> ConfigurationVersion:
+    """Return one configuration version and its preceding diff."""
+    return ConfigurationVersion(**get_configuration(version))
+
+
+@app.get(
+    "/api/agent/configuration/current", operation_id="get_current_agent_configuration"
+)
+def current_agent_configuration() -> dict[str, Any]:
+    """Return the current score-free claim agent configuration."""
+    return agent_configuration()
+
+
+@app.get("/api/agent/configuration/{version}", operation_id="get_agent_configuration")
+def selected_agent_configuration(version: int) -> dict[str, Any]:
+    """Return one score-free claim agent configuration version."""
+    return agent_configuration(version)
+
+
+@app.get("/api/recipes", operation_id="list_recipe_versions")
+def recipe_history(
+    _handler: Annotated[dict[str, Any], Depends(current_handler)],
+) -> RecipeHistory:
+    """List improvement recipe versions and their diffs."""
+    return RecipeHistory(**list_recipes())
+
+
+@app.get("/api/internal/recipes/current", operation_id="get_current_recipe")
+def internal_current_recipe() -> dict[str, Any]:
+    """Return the current recipe for the improver service."""
+    return current_recipe()
+
+
+@app.get("/api/settings", operation_id="get_platform_settings")
+def platform_settings(
+    _handler: Annotated[dict[str, Any], Depends(current_handler)],
+) -> PlatformSettings:
+    """Return platform settings and the read-only allowed models."""
+    return PlatformSettings(**get_settings())
+
+
+@app.put("/api/settings", operation_id="update_platform_settings")
+def change_platform_settings(
+    request: SettingsUpdate,
+    handler: Annotated[dict[str, Any], Depends(current_handler)],
+) -> PlatformSettings:
+    """Change platform settings and record the signed-in handler."""
+    if not handler["can_approve_over_limit"]:
+        raise HTTPException(
+            status_code=403,
+            detail=(
+                "Only a handler who can approve over-limit payouts may change settings"
+            ),
+        )
+    return PlatformSettings(
+        **update_settings(request.model_dump(), handler["handler_id"])
+    )
+
+
+@app.get("/api/settings/changes", operation_id="list_setting_changes")
+def setting_changes(
+    _handler: Annotated[dict[str, Any], Depends(current_handler)],
+) -> list[SettingChange]:
+    """List audited platform setting changes, newest first."""
+    return [SettingChange(**change) for change in list_setting_changes()]
+
+
+@app.get("/api/rounds", operation_id="list_improvement_rounds")
+def improvement_rounds(
+    _handler: Annotated[dict[str, Any], Depends(current_handler)],
+) -> list[RoundRecord]:
+    """List improvement rounds, newest first."""
+    return [RoundRecord(**round) for round in list_rounds()]
 
 
 @app.get("/api/claims", operation_id="list_claims")
@@ -231,25 +333,13 @@ def get_evaluation(run_id: int) -> EvaluationRecord:
 )
 def internal_create_evaluation(request: CreateEvaluationRequest) -> RunRecord:
     """Create an evaluation and its isolated claim copies for the service."""
-    return RunRecord(
-        **create_evaluation(
-            request.concurrency,
-            request.evaluation_set,
-            request.tiny,
-            request.model_name,
-            request.reasoning_effort,
-        )
-    )
+    return RunRecord(**create_evaluation(request))
 
 
 @app.post("/api/internal/dispatches", operation_id="create_dispatch", status_code=201)
 def internal_create_dispatch(request: CreateRunRequest) -> RunRecord:
     """Create the agent service's dispatch and select its claims."""
-    return RunRecord(
-        **create_dispatch(
-            request.concurrency, request.model_name, request.reasoning_effort
-        )
-    )
+    return RunRecord(**create_dispatch(request))
 
 
 @app.post("/api/internal/runs/stop-active", operation_id="stop_active_runs")
@@ -381,11 +471,8 @@ def document_section(
 
 @app.get("/api/agent/instructions", operation_id="get_agent_instructions")
 def agent_instructions() -> Instructions:
-    """Return the claim agent's read-only instructions."""
-    claim_text = (
-        Path(__file__).with_name("agent_instructions.md").read_text(encoding="utf-8")
-    )
-    return Instructions(claim=claim_text)
+    """Return the current claim agent's read-only instructions."""
+    return Instructions(claim=agent_configuration()["instructions"])
 
 
 @app.get("/api/handlers", operation_id="list_handlers")

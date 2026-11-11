@@ -23,7 +23,7 @@ export default defineConfig({
       reuseExistingServer: true,
     },
     {
-      command: "npx vite dashboard --port 5174 --strictPort",
+      command: "npx vite dashboard --port 5174 --strictPort --mode test",
       url: "http://localhost:5174",
       reuseExistingServer: true,
       env: {

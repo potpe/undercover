@@ -49,14 +49,17 @@ def test_evaluation_uses_claim_graph_without_changing_queue_or_retaining_progres
     monkeypatch.setattr(main, "backend", lambda: TestClient(backend_main.app))
     monkeypatch.setattr(service, "backend", lambda: TestClient(backend_main.app))
     monkeypatch.setattr(dispatcher, "backend", lambda: TestClient(backend_main.app))
-    monkeypatch.setattr(main, "model", lambda: StubModel(payout))
+    monkeypatch.setattr(main, "model", lambda _configuration: StubModel(payout))
     before = client.get("/api/claims").json()
     created = client.post(
         "/api/internal/evaluations",
         json={
             "concurrency": 5,
+            "configuration_version": None,
             "model_name": "openai/gpt-6-luna",
             "reasoning_effort": "low",
+            "round_id": None,
+            "round_purpose": None,
             "evaluation_set": "evaluation",
             "tiny": True,
         },
@@ -93,8 +96,11 @@ def test_terminal_evaluation_error_also_clears_saved_progress(client, monkeypatc
         "/api/internal/evaluations",
         json={
             "concurrency": 5,
+            "configuration_version": None,
             "model_name": "openai/gpt-6-luna",
             "reasoning_effort": "low",
+            "round_id": None,
+            "round_purpose": None,
             "evaluation_set": "evaluation",
             "tiny": True,
         },

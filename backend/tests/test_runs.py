@@ -10,15 +10,16 @@ from backend.models import DecisionKind, DecisionRequest, PaymentRequest
 from backend.workflow import record_decision, record_payment
 
 
-def create_dispatch(
-    client, concurrency=3, model="openai/gpt-6-luna", effort: str | None = "low"
-):
+def create_dispatch(client, concurrency=3, model="openai/gpt-6-luna", effort="low"):
     return client.post(
         "/api/internal/dispatches",
         json={
             "concurrency": concurrency,
+            "configuration_version": None,
             "model_name": model,
             "reasoning_effort": effort,
+            "round_id": None,
+            "round_purpose": None,
         },
     )
 
@@ -110,7 +111,7 @@ def test_dispatch_excludes_settled_held_handler_and_evaluation_claims(client):
     }.isdisjoint(claim["claim_id"] for claim in run["claims"])
 
 
-def test_second_active_run_is_refused_and_override_effort_is_recorded(client):
+def test_second_active_run_is_refused(client):
     first = create_dispatch(client, concurrency=1)
     second = create_dispatch(client, concurrency=25)
 
@@ -120,9 +121,6 @@ def test_second_active_run_is_refused_and_override_effort_is_recorded(client):
 
     stopped = client.post("/api/internal/runs/stop-active")
     assert stopped.json()["stopped"] == 1
-    override = create_dispatch(client, model="openrouter/free", effort=None).json()
-    assert override["model_name"] == "openrouter/free"
-    assert override["reasoning_effort"] is None
 
 
 def test_begin_resumes_saved_thread_and_new_failure_gets_a_fresh_thread(client):

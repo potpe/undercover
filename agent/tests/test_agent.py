@@ -54,6 +54,21 @@ def use_backend(monkeypatch):
     monkeypatch.setattr(main, "backend", lambda: TestClient(app))
 
 
+def create_run(client):
+    response = client.post(
+        "/api/internal/dispatches",
+        json={
+            "concurrency": 3,
+            "configuration_version": None,
+            "model_name": "openai/gpt-6-luna",
+            "reasoning_effort": "low",
+            "round_id": None,
+            "round_purpose": None,
+        },
+    )
+    return response.json()["run_id"]
+
+
 def tool_call(call_id, name, args):
     return AIMessage(
         content="", tool_calls=[{"name": name, "args": args, "id": call_id}]
@@ -151,14 +166,15 @@ def test_graph_approves_and_pays_a_small_claim(client, monkeypatch):
     monkeypatch.setattr(
         main,
         "model",
-        lambda: StubModel(
+        lambda _configuration: StubModel(
             messages=iter(replies),
             model_name="openrouter/free",
             structured_decision=decision(420),
         ),
     )
 
-    result = main.run_with_context("CLM-1001", "thread-1", run_id=1)
+    run_id = create_run(client)
+    result = main.run_with_context("CLM-1001", "thread-1", run_id=run_id)
 
     assert result == "CLM-1001: approve $420.00; payment recorded"
     usage = run_usage(1)
@@ -236,7 +252,7 @@ def test_graph_interrupts_and_resumes_an_over_limit_claim(client, monkeypatch):
         AIMessage(content="Emergency treatment is covered."),
     ]
 
-    def stub_model():
+    def stub_model(_configuration=None):
         return StubModel(messages=iter(replies), structured_decision=decision(3750))
 
     monkeypatch.setattr(main, "model", stub_model)
@@ -252,7 +268,8 @@ def test_graph_interrupts_and_resumes_an_over_limit_claim(client, monkeypatch):
     monkeypatch.setattr(main, "perf_counter", lambda: next(monotonic))
     monkeypatch.setattr(main, "utcnow", lambda: next(times))
 
-    held = main.run_with_context("CLM-1003", "thread-held", run_id=1)
+    run_id = create_run(client)
+    held = main.run_with_context("CLM-1003", "thread-held", run_id=run_id)
 
     assert held == "CLM-1003: approve $3,750.00; waiting for sign-off"
     bundle = client.get("/api/claims/CLM-1003").json()
@@ -316,7 +333,9 @@ def test_signoff_at_new_interrupt_resumes_payment_in_the_same_run(client, monkey
             return {"result": "CLM-1003: approve $3,750.00; payment recorded"}
 
     graph = FakeGraph()
-    monkeypatch.setattr(main, "model", lambda: StubModel(messages=iter([])))
+    monkeypatch.setattr(
+        main, "model", lambda _configuration: StubModel(messages=iter([]))
+    )
     monkeypatch.setattr(main, "build_claim_graph", lambda *args: graph)
     monkeypatch.setattr(
         main, "current_bundle", lambda claim_id: {"signed_off_by": "HND-01"}
@@ -347,7 +366,7 @@ def test_tool_refusal_returns_to_the_model(client, monkeypatch):
     monkeypatch.setattr(
         main,
         "model",
-        lambda: StubModel(
+        lambda _configuration: StubModel(
             messages=iter(replies), structured_decision=decision(0, "decline")
         ),
     )
@@ -369,7 +388,9 @@ def test_graph_stops_at_30_model_calls(client, monkeypatch):
     monkeypatch.setattr(
         main,
         "model",
-        lambda: StubModel(messages=iter(replies), structured_decision=decision(420)),
+        lambda _configuration: StubModel(
+            messages=iter(replies), structured_decision=decision(420)
+        ),
     )
 
     main.run("CLM-1001", "limited")
@@ -385,7 +406,7 @@ def test_each_claim_thread_has_only_its_own_message(client, monkeypatch):
         monkeypatch.setattr(
             main,
             "model",
-            lambda: StubModel(
+            lambda _configuration: StubModel(
                 messages=iter([AIMessage(content="Not covered")]),
                 structured_decision=decision(0, "decline"),
             ),
@@ -421,12 +442,13 @@ def test_resumed_model_usage_belongs_to_the_current_run(client, monkeypatch):
     monkeypatch.setattr(
         main,
         "model",
-        lambda: InterruptibleStub(
+        lambda _configuration: InterruptibleStub(
             messages=iter([first_reply, ModelRateLimitError("429")])
         ),
     )
+    first_run = create_run(client)
     with pytest.raises(ModelRateLimitError):
-        main.run_with_context("CLM-1001", "resume-usage", 1, "dispatch")
+        main.run_with_context("CLM-1001", "resume-usage", first_run, "dispatch")
 
     final_reply = AIMessage(content="The claim is covered")
     final_reply.response_metadata["token_usage"] = {
@@ -438,23 +460,25 @@ def test_resumed_model_usage_belongs_to_the_current_run(client, monkeypatch):
     monkeypatch.setattr(
         main,
         "model",
-        lambda: StubModel(
+        lambda _configuration: StubModel(
             messages=iter([final_reply]), structured_decision=decision(420)
         ),
     )
-    result = main.run_with_context("CLM-1001", "resume-usage", 2, "dispatch")
+    client.post("/api/internal/runs/stop-active")
+    second_run = create_run(client)
+    result = main.run_with_context("CLM-1001", "resume-usage", second_run, "dispatch")
 
     assert result == "CLM-1001: approve $420.00; payment recorded"
-    assert run_usage(1)["model_cost"] == 0.01
-    assert run_usage(2)["model_cost"] == 0.025
+    assert run_usage(first_run)["model_cost"] == 0.01
+    assert run_usage(second_run)["model_cost"] == 0.025
 
 
-def test_model_name(monkeypatch):
+def test_model_uses_the_supplied_version(monkeypatch):
     monkeypatch.setenv("OPENROUTER_API_KEY", "test-key")
-    monkeypatch.delenv("MODEL_NAME", raising=False)
-    assert main.model().model_name == "openai/gpt-6-luna"
-    assert main.model().reasoning_effort == "low"
-    assert main.model().model_dump()["max_tokens"] == 8192
-    monkeypatch.setenv("MODEL_NAME", "openrouter/free")
-    assert main.model().model_name == "openrouter/free"
-    assert main.model().reasoning_effort is None
+    luna = {"model_name": "openai/gpt-6-luna", "reasoning_effort": "low"}
+    assert main.model(luna).model_name == "openai/gpt-6-luna"
+    assert main.model(luna).reasoning_effort == "low"
+    assert main.model(luna).model_dump()["max_tokens"] == 8192
+    free = {"model_name": "openrouter/free", "reasoning_effort": "default"}
+    assert main.model(free).model_name == "openrouter/free"
+    assert main.model(free).reasoning_effort is None

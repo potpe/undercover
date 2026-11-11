@@ -58,6 +58,8 @@ claims_table = Table(
     Column("work_run_id", Integer),
     Column("failed_attempts", Integer, nullable=False, default=0),
     Column("evaluation_run_id", Integer),
+    Column("sign_off_required", Boolean, nullable=False, default=False),
+    Column("approval_limit", Numeric),
     Column("signed_off_at", DateTime(timezone=True)),
     Column("paid_at", DateTime(timezone=True)),
 )
@@ -90,6 +92,74 @@ settings_table = Table(
     metadata,
     Column("key", String, primary_key=True),
     Column("data", JSON, nullable=False),
+)
+setting_changes_table = Table(
+    "setting_changes",
+    metadata,
+    Column("id", Integer, primary_key=True, autoincrement=True),
+    Column("key", String, nullable=False),
+    Column("old_value", JSON, nullable=False),
+    Column("new_value", JSON, nullable=False),
+    Column("changed_by", String, nullable=False),
+    Column("changed_at", DateTime(timezone=True), nullable=False),
+)
+configuration_versions_table = Table(
+    "configuration_versions",
+    metadata,
+    Column("version", Integer, primary_key=True),
+    Column("instructions", Text, nullable=False),
+    Column("model_name", String, nullable=False),
+    Column("reasoning_effort", String, nullable=False),
+    Column("reason", Text, nullable=False),
+    Column("proposed_by", String, nullable=False),
+    Column("approved_by", String),
+    Column("proposed_at", DateTime(timezone=True), nullable=False),
+    Column("approved_at", DateTime(timezone=True)),
+)
+recipe_versions_table = Table(
+    "recipe_versions",
+    metadata,
+    Column("version", Integer, primary_key=True),
+    Column("recipe", Text, nullable=False),
+    Column("reason", Text, nullable=False),
+    Column("proposed_by", String, nullable=False),
+    Column("approved_by", String),
+    Column("proposed_at", DateTime(timezone=True), nullable=False),
+    Column("approved_at", DateTime(timezone=True)),
+)
+rounds_table = Table(
+    "improvement_rounds",
+    metadata,
+    Column("round_id", Integer, primary_key=True, autoincrement=True),
+    Column("thread_id", String, nullable=False, unique=True),
+    Column("status", String, nullable=False),
+    Column("stage", String, nullable=False),
+    Column("recipe_version", Integer, nullable=False),
+    Column("settings", JSON, nullable=False),
+    Column("starting_version", Integer, nullable=False),
+    Column("candidate_version", Integer),
+    Column("held_out_before", JSON),
+    Column("held_out_after", JSON),
+    Column("verdict", String),
+    Column("verdict_reason", Text),
+    Column("created_by", String, nullable=False),
+    Column("created_at", DateTime(timezone=True), nullable=False),
+    Column("finished_at", DateTime(timezone=True)),
+    Column("stopped_at", DateTime(timezone=True)),
+)
+proposals_table = Table(
+    "improvement_proposals",
+    metadata,
+    Column("proposal_id", Integer, primary_key=True, autoincrement=True),
+    Column("round_id", Integer, nullable=False),
+    Column("kind", String, nullable=False),
+    Column("payload", JSON, nullable=False),
+    Column("reason", Text, nullable=False),
+    Column("diff", JSON, nullable=False),
+    Column("status", String, nullable=False),
+    Column("decided_by", String),
+    Column("decided_at", DateTime(timezone=True)),
+    Column("decision_reason", Text),
 )
 held_out_claims_table = Table(
     "held_out_claims",
@@ -137,6 +207,9 @@ runs_table = Table(
     Column("run_id", Integer, primary_key=True, autoincrement=True),
     Column("kind", String, nullable=False),
     Column("concurrency", Integer, nullable=False),
+    Column("configuration_version", Integer, nullable=False),
+    Column("round_id", Integer),
+    Column("round_purpose", String),
     Column("model_name", String, nullable=False),
     Column("reasoning_effort", String),
     Column("evaluation_set", String),
@@ -337,6 +410,66 @@ def seed_evaluation_data(connection: Connection) -> None:
             )
 
 
+def seed_versioning(connection: Connection) -> None:
+    override = os.getenv("MODEL_NAME")
+    model_name = override or "openai/gpt-6-luna"
+    reasoning_effort = "default" if override else "low"
+    values = {
+        "improvement": load_json("improvement.json"),
+        "models_allowed": (
+            [
+                {
+                    "model_name": model_name,
+                    "reasoning_efforts": ["default"],
+                    "input_price": 0,
+                    "output_price": 0,
+                }
+            ]
+            if override
+            else load_json("models.json")
+        ),
+        "current_configuration_version": 1,
+        "current_recipe_version": 1,
+    }
+    for key, value in values.items():
+        exists = connection.execute(
+            select(settings_table.c.key).where(settings_table.c.key == key)
+        ).first()
+        if exists is None:
+            connection.execute(insert(settings_table).values(key=key, data=value))
+    if not connection.execute(
+        select(func.count()).select_from(configuration_versions_table)
+    ).scalar_one():
+        created = timestamp()
+        connection.execute(
+            insert(configuration_versions_table).values(
+                version=1,
+                instructions=(ROOT / "backend" / "agent_instructions.md").read_text(
+                    encoding="utf-8"
+                ),
+                model_name=model_name,
+                reasoning_effort=reasoning_effort,
+                reason="Initial claim agent configuration",
+                proposed_by="UnderCover",
+                proposed_at=created,
+            )
+        )
+    if not connection.execute(
+        select(func.count()).select_from(recipe_versions_table)
+    ).scalar_one():
+        connection.execute(
+            insert(recipe_versions_table).values(
+                version=1,
+                recipe=(ROOT / "backend" / "improver_recipe.md").read_text(
+                    encoding="utf-8"
+                ),
+                reason="Initial improvement recipe",
+                proposed_by="UnderCover",
+                proposed_at=timestamp(),
+            )
+        )
+
+
 def initialize_database() -> None:
     if not os.getenv("DATABASE_URL"):
         database_path().parent.mkdir(parents=True, exist_ok=True)
@@ -348,6 +481,7 @@ def initialize_database() -> None:
         seed_documents(connection)
         seed_business_data(connection)
         seed_evaluation_data(connection)
+        seed_versioning(connection)
 
 
 def reseed_database() -> None:

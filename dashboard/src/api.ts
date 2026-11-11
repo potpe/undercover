@@ -144,9 +144,12 @@ export interface DispatchRun {
   run_id: number;
   kind: "dispatch" | "evaluation";
   concurrency: number;
+  configuration_version: number;
+  round_id: number | null;
+  round_purpose: "baseline" | "candidate" | null;
   status: "in_progress" | "completed" | "stopped";
   model_name: string;
-  reasoning_effort: string | null;
+  reasoning_effort: string;
   evaluation_set: string | null;
   tiny: boolean | null;
   summary: DispatchSummary | null;
@@ -222,6 +225,84 @@ export interface Handler {
   can_approve_over_limit: boolean;
 }
 
+export interface DiffLine {
+  kind: "context" | "added" | "removed";
+  text: string;
+}
+
+export interface VersionScores {
+  accuracy: number | null;
+  grade: number | null;
+  cost_per_claim: number | null;
+  seconds_per_claim: number | null;
+}
+
+export interface ConfigurationVersion {
+  version: number;
+  instructions: string;
+  model_name: string;
+  reasoning_effort: string;
+  reason: string;
+  proposed_by: string;
+  approved_by: string | null;
+  proposed_at: string;
+  approved_at: string | null;
+  diff: DiffLine[];
+  held_out_scores: VersionScores | null;
+}
+
+export interface ConfigurationHistory {
+  current_version: number;
+  versions: ConfigurationVersion[];
+}
+
+export interface RecipeVersion {
+  version: number;
+  recipe: string;
+  reason: string;
+  proposed_by: string;
+  approved_by: string | null;
+  proposed_at: string;
+  approved_at: string | null;
+  diff: DiffLine[];
+}
+
+export interface RecipeHistory {
+  current_version: number;
+  versions: RecipeVersion[];
+}
+
+export interface ScoreFloors {
+  accuracy: number;
+  grade: number;
+}
+
+export interface MeasureSettings {
+  accuracy: number;
+  grade: number;
+  cost_per_claim: number;
+  seconds_per_claim: number;
+}
+
+export interface AllowedModel {
+  model_name: string;
+  reasoning_efforts: string[];
+  input_price: number;
+  output_price: number;
+}
+
+export interface PlatformSettings {
+  approval_limit: number;
+  objectives: ScoreFloors;
+  noise: MeasureSettings;
+  tolerance: MeasureSettings;
+  spending_limit: number;
+  evaluation_concurrency: number;
+  models_allowed: AllowedModel[];
+}
+
+export type SettingsUpdate = Omit<PlatformSettings, "models_allowed">;
+
 let accessToken: string | null = null;
 
 export function setAccessToken(token: string | null) {
@@ -296,6 +377,24 @@ export function startEvaluation(
 
 export function getCurrentHandler(): Promise<Handler> {
   return request<Handler>("/api/me", { headers: {} });
+}
+
+export function getConfiguration(): Promise<ConfigurationHistory> {
+  return request<ConfigurationHistory>("/api/configuration", { headers: {} });
+}
+
+export function getSettings(): Promise<PlatformSettings> {
+  return request<PlatformSettings>("/api/settings", { headers: {} });
+}
+
+export function saveSettings(
+  settings: SettingsUpdate,
+): Promise<PlatformSettings> {
+  return request<PlatformSettings>("/api/settings", {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(settings),
+  });
 }
 
 export function runClaim(

@@ -12,7 +12,7 @@ from pydantic import BaseModel
 
 from agent import dispatcher
 from agent.checkpoints import clear_claim_thread, close_checkpoint_pool
-from agent.main import backend, current_bundle, model_settings
+from agent.main import backend, current_bundle
 from agent.main import run_with_context as claim_run
 from backend.models import DispatchRequest, RunRecord
 
@@ -43,6 +43,13 @@ class AcceptedResponse(BaseModel):
 def post_backend(path: str, body=None) -> dict:
     with backend() as client:
         response = client.post(path, json=body)
+    response.raise_for_status()
+    return response.json()
+
+
+def get_backend(path: str) -> dict:
+    with backend() as client:
+        response = client.get(path)
     response.raise_for_status()
     return response.json()
 
@@ -188,9 +195,15 @@ def create_run(
             status_code=409, detail="Another dispatch or evaluation is running"
         )
     try:
-        model_name, reasoning_effort = model_settings()
+        configuration = get_backend("/api/agent/configuration/current")
         payload = request.model_dump()
-        payload.update(model_name=model_name, reasoning_effort=reasoning_effort)
+        payload.update(
+            configuration_version=configuration["version"],
+            model_name=configuration["model_name"],
+            reasoning_effort=configuration["reasoning_effort"],
+            round_id=None,
+            round_purpose=None,
+        )
         run = post_backend(path, payload)
         background_tasks.add_task(run_in_background, run["run_id"])
         return run

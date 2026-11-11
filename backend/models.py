@@ -85,6 +85,105 @@ class Handler(BaseModel):
     can_approve_over_limit: bool
 
 
+class ScoreFloors(BaseModel):
+    accuracy: float = Field(ge=0, le=1)
+    grade: float = Field(ge=0, le=3)
+
+
+class MeasureSettings(BaseModel):
+    accuracy: float = Field(ge=0)
+    grade: float = Field(ge=0)
+    cost_per_claim: float = Field(ge=0)
+    seconds_per_claim: float = Field(ge=0)
+
+
+class SettingsUpdate(BaseModel):
+    approval_limit: float = Field(gt=0)
+    objectives: ScoreFloors
+    noise: MeasureSettings
+    tolerance: MeasureSettings
+    spending_limit: float = Field(gt=0)
+    evaluation_concurrency: int = Field(ge=1, le=25)
+
+
+class AllowedModel(BaseModel):
+    model_name: str
+    reasoning_efforts: list[str]
+    input_price: float = Field(ge=0)
+    output_price: float = Field(ge=0)
+
+
+class PlatformSettings(SettingsUpdate):
+    models_allowed: list[AllowedModel]
+
+
+class SettingChange(BaseModel):
+    key: str
+    old_value: Any
+    new_value: Any
+    changed_by: str
+    changed_at: str
+
+
+class DiffLine(BaseModel):
+    kind: Literal["context", "added", "removed"]
+    text: str
+
+
+class ConfigurationVersion(BaseModel):
+    version: int
+    instructions: str
+    model_name: str
+    reasoning_effort: str
+    reason: str
+    proposed_by: str
+    approved_by: str | None
+    proposed_at: str
+    approved_at: str | None
+    diff: list[DiffLine]
+    held_out_scores: dict[str, float | None] | None
+
+
+class ConfigurationHistory(BaseModel):
+    current_version: int
+    versions: list[ConfigurationVersion]
+
+
+class RecipeVersion(BaseModel):
+    version: int
+    recipe: str
+    reason: str
+    proposed_by: str
+    approved_by: str | None
+    proposed_at: str
+    approved_at: str | None
+    diff: list[DiffLine]
+
+
+class RecipeHistory(BaseModel):
+    current_version: int
+    versions: list[RecipeVersion]
+
+
+class RoundRecord(BaseModel):
+    round_id: int
+    thread_id: str
+    status: Literal["open", "finished", "stopped"]
+    stage: str
+    recipe_version: int
+    settings: dict[str, Any]
+    starting_version: int
+    candidate_version: int | None
+    held_out_before: dict[str, float | None] | None
+    held_out_after: dict[str, float | None] | None
+    verdict: Literal["kept", "rolled_back"] | None
+    verdict_reason: str | None
+    created_by: str
+    created_at: str
+    finished_at: str | None
+    stopped_at: str | None
+
+
 class RunRequest(BaseModel):
     thread_id: str = Field(min_length=1)
 
@@ -99,8 +198,11 @@ class DispatchRequest(BaseModel):
 
 
 class CreateRunRequest(DispatchRequest):
+    configuration_version: int | None
     model_name: str = Field(min_length=1)
-    reasoning_effort: str | None
+    reasoning_effort: str
+    round_id: int | None
+    round_purpose: Literal["baseline", "candidate"] | None
 
 
 class CompleteWorkRequest(BaseModel):
@@ -161,9 +263,12 @@ class RunRecord(BaseModel):
     run_id: int
     kind: Literal["dispatch", "evaluation"]
     concurrency: int
+    configuration_version: int
+    round_id: int | None
+    round_purpose: Literal["baseline", "candidate"] | None
     status: Literal["in_progress", "completed", "stopped"]
     model_name: str
-    reasoning_effort: str | None
+    reasoning_effort: str
     evaluation_set: str | None
     tiny: bool | None
     summary: DispatchSummary | None

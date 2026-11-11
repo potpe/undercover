@@ -14,17 +14,24 @@ from backend.database import (
     runs_table,
     timestamp,
 )
-from backend.runs import inserted_id, require_run
+from backend.models import CreateEvaluationRequest
+from backend.runs import inserted_id, require_run, selected_configuration
 
 
-def create_evaluation(
-    concurrency: int,
-    evaluation_set: str,
-    tiny: bool,
-    model_name: str,
-    reasoning_effort: str | None,
-) -> dict[str, Any]:
+def create_evaluation(request: CreateEvaluationRequest) -> dict[str, Any]:
+    concurrency = request.concurrency
+    evaluation_set = request.evaluation_set
+    tiny = request.tiny
+    round_id = request.round_id
+    round_purpose = request.round_purpose
     with connect() as connection:
+        version = selected_configuration(
+            connection,
+            request.configuration_version,
+            request.model_name,
+            request.reasoning_effort,
+            round_id,
+        )
         active = connection.execute(
             select(runs_table.c.run_id).where(runs_table.c.status == "in_progress")
         ).first()
@@ -73,8 +80,11 @@ def create_evaluation(
             insert(runs_table).values(
                 kind="evaluation",
                 concurrency=concurrency,
-                model_name=model_name,
-                reasoning_effort=reasoning_effort,
+                configuration_version=version["version"],
+                round_id=round_id,
+                round_purpose=round_purpose,
+                model_name=version["model_name"],
+                reasoning_effort=version["reasoning_effort"],
                 evaluation_set=evaluation_set,
                 tiny=tiny,
                 status="in_progress",

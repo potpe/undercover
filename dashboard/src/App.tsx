@@ -3,7 +3,6 @@ import type { Session } from "@supabase/supabase-js";
 import {
   getCurrentDispatch,
   getCurrentHandler,
-  getInstructions,
   listClaims,
   setAccessToken,
   startDispatch,
@@ -12,14 +11,16 @@ import {
   type Handler,
 } from "./api";
 import { ClaimWorkspace } from "./ClaimWorkspace";
+import { Configuration } from "./Configuration";
 import { formatClaimType, formatMoney } from "./format";
 import { RunPanel } from "./RunPanel";
 import { Scoreboard } from "./Scoreboard";
 import { SignIn } from "./SignIn";
 import { StatusBadge } from "./StatusBadge";
 import { supabase } from "./supabase";
-
-type View = "queue" | "scoreboard" | "instructions";
+import { Settings } from "./Settings";
+import { savedAppearance } from "./appearance";
+import { Navigation, type View } from "./Navigation";
 
 function QueueView({
   onSelect,
@@ -173,55 +174,18 @@ function QueueView({
   );
 }
 
-function InstructionsView() {
-  const [instructions, setInstructions] = useState({ claim: "" });
-  const [state, setState] = useState<"loading" | "ready" | "error">("loading");
-
-  useEffect(() => {
-    let active = true;
-    getInstructions()
-      .then((data) => {
-        if (active) {
-          setInstructions(data);
-          setState("ready");
-        }
-      })
-      .catch(() => {
-        if (active) setState("error");
-      });
-    return () => {
-      active = false;
-    };
-  }, []);
-
-  if (state === "loading")
-    return <p role="status">Loading agent instructions…</p>;
-  if (state === "error") {
-    return <p role="alert">We could not load the agent instructions.</p>;
-  }
-
-  return (
-    <section
-      className="panel instructions-panel"
-      aria-labelledby="instructions-title"
-    >
-      <p className="eyebrow">UnderCover Agent</p>
-      <h1 id="instructions-title">Agent instructions</h1>
-      <p>The current instructions are read only.</p>
-      <article>
-        <h2>Claim agent</h2>
-        <pre>{instructions.claim}</pre>
-      </article>
-    </section>
-  );
-}
-
 export function App() {
   const [view, setView] = useState<View>("queue");
   const [selectedClaim, setSelectedClaim] = useState<string | null>(null);
   const [session, setSession] = useState<Session | null | undefined>(undefined);
   const [handler, setHandler] = useState<Handler | null>(null);
   const [authError, setAuthError] = useState("");
+  const [appearance, setAppearance] = useState(savedAppearance);
+
+  useEffect(() => {
+    document.documentElement.dataset.theme = appearance;
+    localStorage.setItem("undercover-appearance", appearance);
+  }, [appearance]);
 
   useEffect(() => {
     let active = true;
@@ -307,7 +271,15 @@ export function App() {
         }}
       />
     );
-  if (view === "instructions") mainContent = <InstructionsView />;
+  if (view === "configuration") mainContent = <Configuration />;
+  if (view === "settings")
+    mainContent = (
+      <Settings
+        handler={handler}
+        appearance={appearance}
+        onAppearanceChange={setAppearance}
+      />
+    );
 
   return (
     <div className="app-shell">
@@ -321,40 +293,13 @@ export function App() {
             <span className="brand-product">Claims platform</span>
           </div>
         </div>
-        <nav aria-label="Main navigation">
-          <button
-            type="button"
-            className={view === "queue" ? "nav-active" : ""}
-            aria-current={view === "queue" ? "page" : undefined}
-            onClick={() => {
-              setView("queue");
-              setSelectedClaim(null);
-            }}
-          >
-            Claims
-          </button>
-          <button
-            type="button"
-            className={view === "scoreboard" ? "nav-active" : ""}
-            aria-current={view === "scoreboard" ? "page" : undefined}
-            onClick={() => {
-              setView("scoreboard");
-              setSelectedClaim(null);
-            }}
-          >
-            Scoreboard
-          </button>
-          <button
-            type="button"
-            className={view === "instructions" ? "nav-active" : ""}
-            aria-current={view === "instructions" ? "page" : undefined}
-            onClick={() => {
-              setView("instructions");
-            }}
-          >
-            Agent instructions
-          </button>
-        </nav>
+        <Navigation
+          view={view}
+          onSelect={(next) => {
+            setView(next);
+            setSelectedClaim(null);
+          }}
+        />
         <div className="handler-session">
           <span>{handler.name}</span>
           <span className="muted">{handler.email}</span>

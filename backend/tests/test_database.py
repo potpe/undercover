@@ -21,8 +21,11 @@ def test_reseed_restores_the_queue_and_clears_all_work(client):
         "/api/internal/dispatches",
         json={
             "concurrency": 1,
+            "configuration_version": None,
             "model_name": "openai/gpt-6-luna",
             "reasoning_effort": "low",
+            "round_id": None,
+            "round_purpose": None,
         },
     )
 

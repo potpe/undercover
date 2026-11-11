@@ -186,7 +186,7 @@ export function RunPanel({
             </span>
             <span>{run.concurrency} agents at once</span>
             <span className="mono">{run.model_name}</span>
-            <span>Reasoning: {run.reasoning_effort ?? "none"}</span>
+            <span>Reasoning: {run.reasoning_effort}</span>
           </div>
           <div className="run-metrics">
             <span>Model cost: {formatModelCost(run.model_cost)}</span>

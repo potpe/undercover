@@ -4,6 +4,7 @@ from typing import Any
 from fastapi import HTTPException
 from sqlalchemy import Connection, RowMapping, func, insert, select, update
 
+from backend.configurations import configuration_row
 from backend.database import (
     claims_table,
     connect,
@@ -15,6 +16,7 @@ from backend.database import (
     timestamp,
     work_periods_table,
 )
+from backend.models import CreateRunRequest
 
 
 def usage_records(connection: Connection, run_id: int | None) -> dict[str, Any]:
@@ -140,6 +142,9 @@ def run_record(connection: Connection, row: RowMapping) -> dict[str, Any]:
         "run_id": row["run_id"],
         "kind": row["kind"],
         "concurrency": row["concurrency"],
+        "configuration_version": row["configuration_version"],
+        "round_id": row["round_id"],
+        "round_purpose": row["round_purpose"],
         "status": row["status"],
         "model_name": row["model_name"],
         "reasoning_effort": row["reasoning_effort"],
@@ -198,10 +203,39 @@ def inserted_id(result: Any) -> int:
     return int(primary_key[0])
 
 
-def create_dispatch(
-    concurrency: int, model_name: str, reasoning_effort: str | None
-) -> dict[str, Any]:
+def selected_configuration(
+    connection: Connection,
+    requested_version: int | None,
+    model_name: str,
+    reasoning_effort: str,
+    round_id: int | None,
+) -> RowMapping:
+    row = configuration_row(
+        connection,
+        requested_version if round_id is not None else None,
+    )
+    if requested_version is not None and row["version"] != requested_version:
+        raise HTTPException(status_code=409, detail="Run must use the current version")
+    if row["model_name"] != model_name or row["reasoning_effort"] != reasoning_effort:
+        raise HTTPException(
+            status_code=400, detail="Model settings do not match the run's version"
+        )
+    return row
+
+
+def create_dispatch(request: CreateRunRequest) -> dict[str, Any]:
+    if request.round_id is not None or request.round_purpose is not None:
+        raise HTTPException(
+            status_code=400, detail="A dispatch cannot belong to a round"
+        )
     with connect() as connection:
+        version = selected_configuration(
+            connection,
+            request.configuration_version,
+            request.model_name,
+            request.reasoning_effort,
+            request.round_id,
+        )
         active = connection.execute(
             select(runs_table.c.run_id).where(runs_table.c.status == "in_progress")
         ).first()
@@ -226,9 +260,12 @@ def create_dispatch(
         result = connection.execute(
             insert(runs_table).values(
                 kind="dispatch",
-                concurrency=concurrency,
-                model_name=model_name,
-                reasoning_effort=reasoning_effort,
+                concurrency=request.concurrency,
+                configuration_version=version["version"],
+                round_id=None,
+                round_purpose=None,
+                model_name=version["model_name"],
+                reasoning_effort=version["reasoning_effort"],
                 status="in_progress",
                 created_at=timestamp(),
             )

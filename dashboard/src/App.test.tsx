@@ -8,7 +8,8 @@ import {
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import type { Session } from "@supabase/supabase-js";
 import { App } from "./App";
-import type { ClaimSummary, DispatchRun, Handler } from "./api";
+import type { ClaimSummary, DispatchRun } from "./api";
+import { testHandler as currentHandler } from "./testHandler";
 
 const auth = vi.hoisted(() => ({
   getSession: vi.fn(),
@@ -25,14 +26,6 @@ const session = {
   access_token: "dana-token",
   user: { email: "dana.whitfield@undercover.example" },
 } as unknown as Session;
-
-const currentHandler: Handler = {
-  handler_id: "HND-01",
-  name: "Dana Whitfield",
-  role: "Senior Claims Handler",
-  email: "dana.whitfield@undercover.example",
-  can_approve_over_limit: true,
-};
 
 const claims: ClaimSummary[] = [
   {
@@ -81,6 +74,9 @@ const completedRun: DispatchRun = {
   run_id: 1,
   kind: "dispatch",
   concurrency: 3,
+  configuration_version: 1,
+  round_id: null,
+  round_purpose: null,
   model_name: "openai/gpt-6-luna",
   reasoning_effort: "low",
   status: "completed",
@@ -176,8 +172,27 @@ function mockApi(currentRun: DispatchRun | null = null) {
     if (url === "/api/dispatches/current")
       return Promise.resolve(response(currentRun));
     if (url === "/api/me") return Promise.resolve(response(currentHandler));
-    if (url === "/api/agent/instructions")
-      return Promise.resolve(response({ claim }));
+    if (url === "/api/configuration")
+      return Promise.resolve(
+        response({
+          current_version: 1,
+          versions: [
+            {
+              version: 1,
+              instructions: claim,
+              model_name: "openai/gpt-6-luna",
+              reasoning_effort: "low",
+              reason: "Initial configuration",
+              proposed_by: "UnderCover",
+              approved_by: null,
+              proposed_at: "2026-11-11T12:00:00Z",
+              approved_at: null,
+              diff: [],
+              held_out_scores: null,
+            },
+          ],
+        }),
+      );
     return Promise.resolve(response({ detail: "Not found" }, 404));
   });
   vi.stubGlobal("fetch", fetchMock);
@@ -252,10 +267,10 @@ it("shows only the claim agent instructions as read-only text", async () => {
   render(<App />);
   await screen.findByText("Maya Patel");
 
-  fireEvent.click(screen.getByRole("button", { name: "Agent instructions" }));
+  fireEvent.click(screen.getByRole("button", { name: "Configuration" }));
 
   expect(await screen.findByText(claim)).toBeDefined();
-  expect(screen.getByRole("heading", { name: "Claim agent" })).toBeDefined();
+  expect(screen.getByRole("heading", { name: "Configuration" })).toBeDefined();
   expect(screen.queryByRole("heading", { name: "Queue agent" })).toBeNull();
   expect(screen.queryByRole("textbox")).toBeNull();
 });
@@ -275,11 +290,11 @@ it("shows an instructions loading failure", async () => {
   render(<App />);
   await screen.findByText("Maya Patel");
 
-  fireEvent.click(screen.getByRole("button", { name: "Agent instructions" }));
+  fireEvent.click(screen.getByRole("button", { name: "Configuration" }));
 
   expect(await screen.findByRole("alert")).toHaveProperty(
     "textContent",
-    "We could not load the agent instructions.",
+    "We could not load configuration versions. Try again.",
   );
 });
 

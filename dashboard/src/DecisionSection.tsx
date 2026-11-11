@@ -64,8 +64,8 @@ export function DecisionSection({
           <div>
             <h3>Handler sign-off</h3>
             <p>
-              This payout is over $1,000.00. Payment is blocked until a handler
-              signs off.
+              This payout exceeded the approval limit when decided. Payment is
+              blocked until a handler signs off.
             </p>
           </div>
           <p>

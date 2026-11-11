@@ -74,12 +74,12 @@ def record_decision(claim_id: str, request: DecisionRequest) -> None:
                 claim_id,
                 "Declines and referrals must have zero payout",
             )
+        current_limit = approval_limit(connection)
+        needs_sign_off = (
+            request.decision == "approve" and request.payout > current_limit
+        )
         if request.decision == "approve":
-            status = (
-                "waiting_for_sign_off"
-                if request.payout > approval_limit(connection)
-                else "in_progress"
-            )
+            status = "waiting_for_sign_off" if needs_sign_off else "in_progress"
         else:
             status = "decided"
         connection.execute(
@@ -91,6 +91,8 @@ def record_decision(claim_id: str, request: DecisionRequest) -> None:
                 reason=request.reason,
                 policy_section=request.policy_section,
                 status=status,
+                sign_off_required=needs_sign_off,
+                approval_limit=current_limit,
             )
         )
         insert_activity(
@@ -119,9 +121,7 @@ def sign_off(claim_id: str, handler_id: str) -> None:
                 "Handler cannot approve over-limit payouts",
                 status_code=403,
             )
-        if row["decision"] != "approve" or float(row["payout"]) <= approval_limit(
-            connection
-        ):
+        if row["status"] != "waiting_for_sign_off" or not row["sign_off_required"]:
             reject(connection, claim_id, "Claim does not need sign-off")
         if row["paid_amount"] is not None:
             reject(connection, claim_id, "Claim already has a payment")
@@ -161,8 +161,8 @@ def record_payment(claim_id: str, request: PaymentRequest) -> None:
                 "Payment must equal the approved payout",
                 action="Payment",
             )
-        limit = approval_limit(connection)
-        if float(row["payout"]) > limit and not row["signed_off_by"]:
+        if row["sign_off_required"] and not row["signed_off_by"]:
+            limit = float(row["approval_limit"])
             message = f"Payout over {money(limit)} requires handler sign-off"
             insert_activity(connection, claim_id, f"Payment blocked: {message}")
             connection.commit()

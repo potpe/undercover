@@ -76,8 +76,11 @@ def create_one_claim_dispatch(client, claim_id):
         "/api/internal/dispatches",
         json={
             "concurrency": 3,
+            "configuration_version": None,
             "model_name": "openai/gpt-6-luna",
             "reasoning_effort": "low",
+            "round_id": None,
+            "round_purpose": None,
         },
     )
     return response.json()["run_id"]
@@ -93,7 +96,7 @@ def test_interrupted_claim_resumes_same_step_thread_and_attempt(client, monkeypa
         ],
         approval(),
     )
-    monkeypatch.setattr(main, "model", lambda: interrupted_model)
+    monkeypatch.setattr(main, "model", lambda _configuration: interrupted_model)
 
     with pytest.raises(KeyboardInterrupt):
         service.work_claim(
@@ -107,7 +110,7 @@ def test_interrupted_claim_resumes_same_step_thread_and_attempt(client, monkeypa
     client.post("/api/internal/runs/stop-active")
 
     resumed_model = StubModel([AIMessage(content="The claim is covered")], approval())
-    monkeypatch.setattr(main, "model", lambda: resumed_model)
+    monkeypatch.setattr(main, "model", lambda _configuration: resumed_model)
     next_id = create_one_claim_dispatch(client, "CLM-1001")
 
     assert service.execute_stored_run(next_id) == "completed"
@@ -128,7 +131,7 @@ def test_signoff_saved_while_agent_is_down_is_recovered(client, monkeypatch):
     stub = StubModel(
         [AIMessage(content="Emergency treatment is covered")], approval(3750)
     )
-    monkeypatch.setattr(main, "model", lambda: stub)
+    monkeypatch.setattr(main, "model", lambda _configuration: stub)
     assert service.execute_stored_run(run_id) == "completed"
 
     signed = client.post("/api/claims/CLM-1003/sign-off", json={"handler_id": "HND-01"})

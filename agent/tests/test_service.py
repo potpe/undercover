@@ -36,8 +36,11 @@ def create_dispatch(client, concurrency=3):
         "/api/internal/dispatches",
         json={
             "concurrency": concurrency,
+            "configuration_version": None,
             "model_name": "openai/gpt-6-luna",
             "reasoning_effort": "low",
+            "round_id": None,
+            "round_purpose": None,
         },
     )
     return response.json()["run_id"]
@@ -300,7 +303,7 @@ def test_signoff_resumes_held_claim_through_service_and_pays_once(client, monkey
         model_name = "stub-model"
         reasoning_effort = "low"
 
-        def __init__(self):
+        def __init__(self, _configuration=None):
             self.replies = iter(
                 [
                     AIMessage(content="Emergency treatment is covered."),

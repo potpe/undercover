@@ -19,20 +19,18 @@ test("the queue shows the 25 pilot claims", async ({ page }) => {
 
 test("the agent instructions are read only", async ({ page }) => {
   await page.goto("/");
-  await page.getByRole("button", { name: "Agent instructions" }).click();
+  await page.getByRole("button", { name: "Configuration" }).click();
 
   await expect(
-    page.getByRole("heading", { name: "Agent instructions" }),
+    page.getByRole("heading", { name: "Configuration" }),
   ).toBeVisible();
-  await expect(
-    page.getByRole("heading", { name: "Claim agent" }),
-  ).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Version 1" })).toBeVisible();
   await expect(page.getByRole("heading", { name: "Queue agent" })).toHaveCount(
     0,
   );
   await expect(
     page.getByText("You are the UnderCover claim agent.", { exact: false }),
-  ).toBeVisible();
+  ).toHaveCount(1);
   await expect(page.getByRole("textbox")).toHaveCount(0);
 });
 
@@ -184,6 +182,9 @@ test("the dashboard shows dispatch claims, record summary and sections read", as
     run_id: 7,
     kind: "dispatch",
     concurrency: 3,
+    configuration_version: 1,
+    round_id: null,
+    round_purpose: null,
     model_name: "openai/gpt-6-luna",
     reasoning_effort: "low",
     status: "completed",
@@ -359,8 +360,11 @@ test("the scoreboard shows an API-played evaluation and linked copy", async ({
     {
       data: {
         concurrency: 5,
+        configuration_version: null,
         model_name: "openai/gpt-6-luna",
         reasoning_effort: "low",
+        round_id: null,
+        round_purpose: null,
         evaluation_set: "evaluation",
         tiny: true,
       },

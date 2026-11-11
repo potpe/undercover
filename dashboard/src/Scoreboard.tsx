@@ -285,8 +285,7 @@ export function Scoreboard({
             </span>
           </div>
           <p className="mono">
-            {evaluation.model_name}; reasoning:{" "}
-            {evaluation.reasoning_effort ?? "none"}
+            {evaluation.model_name}; reasoning: {evaluation.reasoning_effort}
           </p>
           <Measures evaluation={evaluation} />
           <button

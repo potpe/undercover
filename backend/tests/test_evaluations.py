@@ -20,8 +20,11 @@ def create_evaluation(client, evaluation_set="evaluation", tiny=False, concurren
         "/api/internal/evaluations",
         json={
             "concurrency": concurrency,
+            "configuration_version": None,
             "model_name": "openai/gpt-6-luna",
             "reasoning_effort": "low",
+            "round_id": None,
+            "round_purpose": None,
             "evaluation_set": evaluation_set,
             "tiny": tiny,
         },
@@ -108,8 +111,11 @@ def test_evaluation_copies_have_new_ids_and_leave_queue_unchanged(client):
         "/api/internal/dispatches",
         json={
             "concurrency": 3,
+            "configuration_version": None,
             "model_name": "openai/gpt-6-luna",
             "reasoning_effort": "low",
+            "round_id": None,
+            "round_purpose": None,
         },
     ).json()
     assert all(

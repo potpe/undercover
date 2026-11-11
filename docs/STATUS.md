@@ -1,6 +1,6 @@
 # Status
 
-The swarm and scoreboard implementation is complete. Improvement Phase 1 adds Supabase password sign-in, verified handler permissions and identity-based sign-off; later improvement phases remain in progress. Offline checks pass; hosted acceptance has remaining provider/connection limitations documented below.
+The swarm and scoreboard implementation is complete. Improvement Phases 1–2 add Supabase password sign-in, handler permissions, configuration/recipe version 1, version-pinned runs, audited settings and browser appearance. Judge/improver phases remain in progress. Offline checks pass; hosted acceptance has remaining provider/connection limitations documented below.
 
 - `backend/`: FastAPI and SQLAlchemy Core on SQLite offline or Supabase Postgres. APIs cover claims, document reads, deterministic payouts, dispatches, evaluations, usage/time ledgers, decisions, sign-off, payment and record-built summaries/scores. The backend enforces the $1,000 sign-off rule and idempotent writes. Handler sources and decisions are backend-only.
 - `agent/`: a synchronous durable claim graph plus a model-free LangGraph dispatcher using `Send`, N-way concurrency and targeted retries. Claim threads and attempts survive stopped runs. A process-wide synchronous pool caps checkpoint connections at four with a separate saver per claim. Langfuse keeps claim/thread sessions and adds run tags.
@@ -17,7 +17,9 @@ npm install
 
 For hosted/live work, set `DATABASE_URL`, `OPENROUTER_API_KEY`, `LANGFUSE_SECRET_KEY`, `LANGFUSE_PUBLIC_KEY`, `LANGFUSE_BASE_URL`, `VITE_SUPABASE_URL`, `VITE_SUPABASE_PUBLISHABLE_KEY` and `HANDLER_PASSWORD` in `.env`. The Supabase project needs the three handler users with sign-up disabled and asymmetric JWT signing keys; no Supabase secret is used. `UNDERCOVER_AGENT` is optional and defaults to `http://127.0.0.1:8002`.
 
-The default model is `openai/gpt-6-luna` with low reasoning. `MODEL_NAME` overrides it with no reasoning effort, recorded as `none`. Tests do not read `.env` and need no hosted service.
+The seeded default configuration is `openai/gpt-6-luna` with low reasoning. Seeding with `MODEL_NAME` instead creates that model at `default` reasoning and a zero-price one-model catalog. Runs pin their configuration version; the service no longer independently chooses a model for each claim. Tests do not read `.env` and need no hosted service. Vite reads root `.env` only in development mode; tests use explicit local values.
+
+Configuration replaces Instructions. Settings displays the approval limit, improvement objectives/noise/tolerance/budget/concurrency and the read-only model catalog. Senior handlers confirm platform changes; every changed value records its handler and time. A changed approval limit applies to new decisions, while old approvals retain their original sign-off requirement. Light/dark/system appearance stays in this browser.
 
 ## Reseed
 
@@ -54,6 +56,8 @@ npm run check
 This runs Ruff, Pyright, pytest with at least 80% coverage, Prettier, ESLint, tsc, Vitest with at least 80% coverage, and Playwright. Stop development services first so Playwright can start isolated services.
 
 ## Verification
+
+Improvement Phase 2: the full gate passes 122 Python tests at 93.67% coverage, 37 Vitest tests at 89.08% statement coverage and 12 Playwright tests. All model/Auth interactions are stubs; no hosted resources have been reseeded during implementation. Existing databases need the planned explicit seed after services stop before running the changed schema; normal startup does not migrate or reset old tables.
 
 Improvement Phase 1: `npm run check` passed with `.env` absent. The dashboard suite has 32 tests at 88.58% statement coverage, and all ten Playwright tests sign in through the local Auth/JWKS stand-in. Backend tests cover signed tokens, audience/expiry, missing and invalid credentials, unknown users and Dana/Marcus sign-off permissions.
 

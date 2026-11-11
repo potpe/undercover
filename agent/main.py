@@ -163,7 +163,7 @@ def save_model_usage(state: ClaimState, selected_model: Any, response: Any) -> N
     request = ModelCallRequest(
         run_id=state["run_id"],
         model_name=selected_model.model_name,
-        reasoning_effort=selected_model.reasoning_effort,
+        reasoning_effort=selected_model.reasoning_effort or "default",
         prompt_tokens=usage["prompt_tokens"],
         completion_tokens=usage["completion_tokens"],
         total_tokens=usage["total_tokens"],
@@ -217,22 +217,18 @@ def claim_config(
     }
 
 
-def model_settings() -> tuple[str, str | None]:
-    name = os.getenv("MODEL_NAME")
-    return name or DEFAULT_MODEL, None if name else "low"
-
-
-def model() -> ChatOpenAI:
-    """Return the model named in MODEL_NAME, or GPT-6 Luna by default."""
-    name, reasoning_effort = model_settings()
-    return ChatOpenAI(
-        model=name,
-        base_url=OPENROUTER_BASE_URL,
-        api_key=SecretStr(os.environ["OPENROUTER_API_KEY"]),
-        reasoning_effort=reasoning_effort,
-        timeout=60,
-        max_completion_tokens=8192,
-    )
+def model(configuration: dict[str, Any]) -> ChatOpenAI:
+    """Build the model pinned by one configuration version."""
+    settings: dict[str, Any] = {
+        "model": configuration["model_name"],
+        "base_url": OPENROUTER_BASE_URL,
+        "api_key": SecretStr(os.environ["OPENROUTER_API_KEY"]),
+        "timeout": 60,
+        "max_completion_tokens": 8192,
+    }
+    if configuration["reasoning_effort"] != "default":
+        settings["reasoning_effort"] = configuration["reasoning_effort"]
+    return ChatOpenAI(**settings)
 
 
 def route_after_agent(state: ClaimState) -> str:
@@ -360,6 +356,22 @@ def run(claim_id: str, thread_id: str) -> str:
     return run_with_context(claim_id, thread_id, None, "dispatch")
 
 
+def run_configuration(claim_id: str, run_id: int | None) -> dict[str, Any]:
+    """Fetch the version pinned by a run, or the current version for named work."""
+    if run_id is None:
+        run_id = current_bundle(claim_id).get("work_run_id")
+    with backend() as client:
+        if run_id is None:
+            response = client.get("/api/agent/configuration/current")
+        else:
+            run_response = client.get(f"/api/internal/runs/{run_id}")
+            run_response.raise_for_status()
+            version = run_response.json()["configuration_version"]
+            response = client.get(f"/api/agent/configuration/{version}")
+    response.raise_for_status()
+    return response.json()
+
+
 def run_with_context(
     claim_id: str,
     thread_id: str,
@@ -367,15 +379,13 @@ def run_with_context(
     run_kind: str = "dispatch",
 ) -> str:
     """Start or continue one claim on its durable thread."""
-    with backend() as client:
-        response = client.get("/api/agent/instructions")
-    response.raise_for_status()
+    configuration = run_configuration(claim_id, run_id)
     if run_id is None:
         run_id = current_bundle(claim_id).get("work_run_id")
-    selected_model = model()
+    selected_model = model(configuration)
     with claim_checkpointer() as checkpointer:
         graph = build_claim_graph(
-            selected_model, response.json()["claim"], checkpointer
+            selected_model, configuration["instructions"], checkpointer
         )
         config = claim_config(thread_id, [], run_id, run_kind)
         saved = graph.get_state(config)
