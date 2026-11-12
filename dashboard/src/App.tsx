@@ -12,6 +12,7 @@ import {
 } from "./api";
 import { ClaimWorkspace } from "./ClaimWorkspace";
 import { Configuration } from "./Configuration";
+import { Improvement } from "./Improvement";
 import { formatClaimType, formatMoney } from "./format";
 import { RunPanel } from "./RunPanel";
 import { Scoreboard } from "./Scoreboard";
@@ -272,6 +273,7 @@ export function App() {
       />
     );
   if (view === "configuration") mainContent = <Configuration />;
+  if (view === "improvement") mainContent = <Improvement handler={handler} />;
   if (view === "settings")
     mainContent = (
       <Settings

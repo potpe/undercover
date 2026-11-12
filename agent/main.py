@@ -266,6 +266,7 @@ def build_claim_graph(
     )
 
     def agent(state: ClaimState) -> dict[str, Any]:
+        check_model_budget(state)
         response = model_with_tools.invoke([system_message, *state["messages"]])
         save_model_usage(state, selected_model, response)
         return {
@@ -274,6 +275,7 @@ def build_claim_graph(
         }
 
     def decide(state: ClaimState) -> dict[str, Any]:
+        check_model_budget(state)
         structured = decider.invoke(
             [
                 system_message,
@@ -351,6 +353,13 @@ def current_bundle(claim_id: str) -> dict[str, Any]:
     return response.json()
 
 
+def check_model_budget(state: ClaimState) -> None:
+    if state["run_id"] is not None:
+        with backend() as client:
+            response = client.post(f"/api/internal/runs/{state['run_id']}/budget")
+        response.raise_for_status()
+
+
 def run(claim_id: str, thread_id: str) -> str:
     """Start or continue one claim without a dispatch or evaluation."""
     return run_with_context(claim_id, thread_id, None, "dispatch")
@@ -360,6 +369,7 @@ def run_configuration(claim_id: str, run_id: int | None) -> dict[str, Any]:
     """Fetch the version pinned by a run, or the current version for named work."""
     if run_id is None:
         run_id = current_bundle(claim_id).get("work_run_id")
+    round_id = None
     with backend() as client:
         if run_id is None:
             response = client.get("/api/agent/configuration/current")
@@ -367,9 +377,17 @@ def run_configuration(claim_id: str, run_id: int | None) -> dict[str, Any]:
             run_response = client.get(f"/api/internal/runs/{run_id}")
             run_response.raise_for_status()
             version = run_response.json()["configuration_version"]
+            round_id = run_response.json()["round_id"]
             response = client.get(f"/api/agent/configuration/{version}")
     response.raise_for_status()
-    return response.json()
+    return {**response.json(), "round_id": round_id}
+
+
+def version_tags(configuration: dict, run_id: int | None, run_kind: str) -> list[str]:
+    tags = run_tags(run_id, run_kind)
+    if configuration["round_id"] is not None:
+        tags.append(f"round-{configuration['round_id']}")
+    return tags
 
 
 def run_with_context(
@@ -388,6 +406,8 @@ def run_with_context(
             selected_model, configuration["instructions"], checkpointer
         )
         config = claim_config(thread_id, [], run_id, run_kind)
+        tags = version_tags(configuration, run_id, run_kind)
+        config["metadata"] = {"langfuse_tags": tags}
         saved = graph.get_state(config)
         if saved.created_at is not None and not saved.next:
             return saved.values["result"]
@@ -421,9 +441,7 @@ def run_with_context(
         started = perf_counter()
         try:
             log_activity(claim_id, f"Using model {selected_model.model_name}")
-            with trace_claim(
-                claim_id, thread_id, run_tags(run_id, run_kind)
-            ) as callbacks:
+            with trace_claim(claim_id, thread_id, tags) as callbacks:
                 config["callbacks"] = callbacks
                 result = graph.invoke(graph_input, config, durability="sync")
                 if "__interrupt__" in result:

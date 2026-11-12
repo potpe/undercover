@@ -313,13 +313,21 @@ export interface PlatformSettings {
 
 export type SettingsUpdate = Omit<PlatformSettings, "models_allowed">;
 
+export interface SettingChange {
+  key: string;
+  old_value: unknown;
+  new_value: unknown;
+  changed_by: string;
+  changed_at: string;
+}
+
 let accessToken: string | null = null;
 
 export function setAccessToken(token: string | null) {
   accessToken = token;
 }
 
-async function request<T>(path: string, init?: RequestInit): Promise<T> {
+export async function request<T>(path: string, init?: RequestInit): Promise<T> {
   let requestInit = init;
   if (init) {
     const headers = new Headers(init.headers);
@@ -395,6 +403,10 @@ export function getConfiguration(): Promise<ConfigurationHistory> {
 
 export function getSettings(): Promise<PlatformSettings> {
   return request<PlatformSettings>("/api/settings", { headers: {} });
+}
+
+export function getSettingChanges(): Promise<SettingChange[]> {
+  return request<SettingChange[]>("/api/settings/changes", { headers: {} });
 }
 
 export function saveSettings(

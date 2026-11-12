@@ -16,6 +16,7 @@ from backend.database import (
     timestamp,
     work_periods_table,
 )
+from backend.improvement_budget import check_run, check_run_connection
 from backend.judge import grade_evaluation
 from backend.models import CreateRunRequest
 
@@ -287,6 +288,7 @@ def create_dispatch(request: CreateRunRequest) -> dict[str, Any]:
 def work_rows(
     connection: Connection, run_id: int, claim_id: str
 ) -> tuple[RowMapping, RowMapping]:
+    check_run_connection(connection, run_id)
     run = (
         connection.execute(select(runs_table).where(runs_table.c.run_id == run_id))
         .mappings()
@@ -334,6 +336,7 @@ def outcome(
 
 def begin_work(run_id: int, claim_id: str) -> dict[str, Any]:
     with connect() as connection:
+        check_run_connection(connection, run_id, spending=True)
         item, claim = work_rows(connection, run_id, claim_id)
         if item["status"] in ("done", "left_for_handler"):
             return {
@@ -407,6 +410,7 @@ def claim_result(claim: RowMapping) -> str:
 
 
 def complete_work(run_id: int, claim_id: str, result: str) -> dict[str, Any]:
+    check_run(run_id)
     with connect() as connection:
         item, claim = work_rows(connection, run_id, claim_id)
         if claim["status"] not in ("decided", "waiting_for_sign_off"):
@@ -423,6 +427,7 @@ def complete_work(run_id: int, claim_id: str, result: str) -> dict[str, Any]:
 
 
 def fail_work(run_id: int, claim_id: str, error: str) -> dict[str, Any]:
+    check_run(run_id)
     with connect() as connection:
         item, claim = work_rows(connection, run_id, claim_id)
         if claim["status"] in ("decided", "waiting_for_sign_off"):
@@ -528,9 +533,11 @@ def selected_summary(connection: Connection, run_id: int, error: str | None) -> 
 
 
 def finish_run(run_id: int) -> dict[str, Any]:
+    check_run(run_id)
     require_run(run_id)
     grade_evaluation(run_id)
     with connect() as connection:
+        check_run_connection(connection, run_id)
         exists = connection.execute(
             select(runs_table.c.run_id).where(runs_table.c.run_id == run_id)
         ).first()
@@ -546,8 +553,10 @@ def finish_run(run_id: int) -> dict[str, Any]:
 
 
 def stop_run(run_id: int, error: str) -> None:
+    check_run(run_id)
     grade_evaluation(run_id)
     with connect() as connection:
+        check_run_connection(connection, run_id)
         summary = selected_summary(connection, run_id, error)
         connection.execute(
             update(runs_table)

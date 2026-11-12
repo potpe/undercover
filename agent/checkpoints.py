@@ -56,8 +56,8 @@ def claim_checkpointer() -> Iterator[BaseCheckpointSaver]:
     path.parent.mkdir(parents=True, exist_ok=True)
     connection = sqlite3.connect(path, check_same_thread=False)
     checkpointer = SqliteSaver(connection)
-    checkpointer.setup()
     try:
+        checkpointer.setup()
         yield checkpointer
     finally:
         connection.close()
@@ -73,3 +73,10 @@ def close_checkpoint_pool() -> None:
 def clear_claim_thread(thread_id: str) -> None:
     with claim_checkpointer() as checkpointer:
         checkpointer.delete_thread(thread_id)
+
+
+@contextmanager
+def improver_checkpointer() -> Iterator[BaseCheckpointSaver]:
+    """Use a separate saver instance and unique round threads on the shared pool."""
+    with claim_checkpointer() as saver:
+        yield saver

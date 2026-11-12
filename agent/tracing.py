@@ -33,3 +33,18 @@ def trace_claim(
             yield [cast(BaseCallbackHandler, handler)]
     finally:
         langfuse.flush()
+
+
+@contextmanager
+def trace_round(round_id: int) -> Iterator[list[BaseCallbackHandler]]:
+    if not all(os.getenv(key) for key in LANGFUSE_KEYS):
+        yield []
+        return
+    langfuse = get_client()
+    try:
+        with propagate_attributes(
+            session_id=f"Improvement {round_id}", tags=[f"round-{round_id}"]
+        ):
+            yield [cast(BaseCallbackHandler, CallbackHandler())]
+    finally:
+        langfuse.flush()

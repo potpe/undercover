@@ -56,3 +56,16 @@ def current_handler(request: Request) -> dict[str, Any]:
     if handler is None:
         raise HTTPException(status_code=403, detail="This user is not a claims handler")
     return handler
+
+
+def senior_handler(request: Request) -> dict[str, Any]:
+    handler = current_handler(request)
+    if not handler["can_approve_over_limit"]:
+        raise HTTPException(
+            status_code=403,
+            detail=(
+                "Only a handler who can approve over-limit payouts "
+                "may manage improvement rounds"
+            ),
+        )
+    return handler

@@ -1184,6 +1184,76 @@ footer {
   background: rgb(4 35 46 / 65%);
 }
 
+.round-progress {
+  min-height: 3rem;
+  padding-block: 1rem;
+  font-weight: 600;
+}
+
+.round-heading {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 1rem;
+}
+
+.round-open {
+  background: #ffc145;
+  color: #073b4c;
+}
+
+.round-finished {
+  background: #06d6a0;
+  color: #073b4c;
+}
+
+.round-stopped {
+  background: #ef476f;
+  color: #ffffff;
+}
+
+.proposal-models {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(16rem, 1fr));
+  gap: 1rem;
+}
+
+.detail-section textarea {
+  display: block;
+  width: 100%;
+  padding: 0.75rem;
+  margin-top: 0.5rem;
+  background: var(--panel);
+  color: var(--text);
+  border: 1px solid var(--muted);
+  border-radius: 0.5rem;
+  font: inherit;
+  resize: vertical;
+}
+
+.version-chart {
+  width: 100%;
+  max-width: 720px;
+  height: 300px;
+  color: var(--text);
+}
+
+.version-chart text {
+  fill: currentColor;
+  font-size: 13px;
+}
+
+.chart-accuracy {
+  fill: #06d6a0;
+  stroke: var(--text);
+}
+
+.chart-grade {
+  fill: #ffc145;
+  stroke: var(--text);
+}
+
 .scoreboard-layout {
   display: grid;
   gap: 1rem;

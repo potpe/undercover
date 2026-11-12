@@ -108,7 +108,7 @@ def test_only_one_dispatch_or_evaluation_can_start(client, monkeypatch):
     use_backend(monkeypatch)
 
     first = service.start_dispatch(DispatchRequest(concurrency=3), BackgroundTasks())
-    with pytest.raises(Exception, match="Another dispatch or evaluation is running"):
+    with pytest.raises(Exception, match=f"dispatch {first.run_id} is running"):
         service.start_evaluation(
             service.EvaluationRequest(
                 concurrency=5, evaluation_set="evaluation", tiny=True

@@ -6,6 +6,7 @@ from backend.configurations import text_diff
 from backend.database import (
     configuration_versions_table,
     connect,
+    recipe_versions_table,
     reseed_database,
     settings_table,
     timestamp,
@@ -51,6 +52,68 @@ def test_diff_uses_difflib_additions_and_removals():
         {"kind": "removed", "text": "two"},
         {"kind": "added", "text": "three"},
     ]
+
+
+def test_configuration_and_recipe_history_return_exact_diffs(client):
+    configuration_lines = [
+        {"kind": "context", "text": "Rule one"},
+        {"kind": "removed", "text": "Old rule"},
+        {"kind": "added", "text": "New rule"},
+        {"kind": "context", "text": "Rule three"},
+    ]
+    recipe_lines = [
+        {"kind": "context", "text": "Read the results"},
+        {"kind": "removed", "text": "Use old test"},
+        {"kind": "added", "text": "Use held-out test"},
+        {"kind": "context", "text": "Improve the recipe"},
+    ]
+    with connect() as connection:
+        connection.execute(
+            update(configuration_versions_table)
+            .where(configuration_versions_table.c.version == 1)
+            .values(instructions="Rule one\nOld rule\nRule three\n")
+        )
+        connection.execute(
+            insert(configuration_versions_table).values(
+                version=2,
+                instructions="Rule one\nNew rule\nRule three\n",
+                model_name="openai/gpt-6-luna",
+                reasoning_effort="low",
+                reason="Clarify a general rule",
+                proposed_by="improver",
+                approved_by="HND-01",
+                proposed_at=timestamp(),
+                approved_at=timestamp(),
+            )
+        )
+        connection.execute(
+            update(settings_table)
+            .where(settings_table.c.key == "current_configuration_version")
+            .values(data=2)
+        )
+        connection.execute(
+            update(recipe_versions_table)
+            .where(recipe_versions_table.c.version == 1)
+            .values(recipe="Read the results\nUse old test\nImprove the recipe\n")
+        )
+        connection.execute(
+            insert(recipe_versions_table).values(
+                version=2,
+                recipe="Read the results\nUse held-out test\nImprove the recipe\n",
+                reason="Use the right test set",
+                proposed_by="improver",
+                approved_by="HND-01",
+                proposed_at=timestamp(),
+                approved_at=timestamp(),
+            )
+        )
+
+    configurations = client.get("/api/configuration").json()["versions"]
+    recipes = client.get("/api/recipes").json()["versions"]
+    assert configurations[0]["diff"] == []
+    assert configurations[1]["diff"] == configuration_lines
+    assert recipes[0]["diff"] == []
+    assert recipes[1]["diff"] == recipe_lines
 
 
 def test_free_override_is_the_only_allowed_configuration(client, monkeypatch):
@@ -105,6 +168,9 @@ def test_existing_run_keeps_its_version_when_current_changes(client):
         "round_purpose": None,
     }
     first = client.post("/api/internal/dispatches", json=payload).json()
+    assert first["configuration_version"] == 1
+    assert first["model_name"] == "openai/gpt-6-luna"
+    assert first["reasoning_effort"] == "low"
     client.post("/api/internal/runs/stop-active")
     with connect() as connection:
         connection.execute(
@@ -136,12 +202,12 @@ def test_existing_run_keeps_its_version_when_current_changes(client):
     )
     assert second.status_code == 201
     assert second.json()["configuration_version"] == 2
-    assert (
-        client.get(f"/api/internal/runs/{first['run_id']}").json()[
-            "configuration_version"
-        ]
-        == 1
-    )
+    assert second.json()["model_name"] == "openai/gpt-6-luna"
+    assert second.json()["reasoning_effort"] == "medium"
+    first_record = client.get(f"/api/internal/runs/{first['run_id']}").json()
+    assert first_record["configuration_version"] == 1
+    assert first_record["model_name"] == "openai/gpt-6-luna"
+    assert first_record["reasoning_effort"] == "low"
     history = client.get("/api/configuration").json()
     assert history["current_version"] == 2
     assert history["versions"][1]["diff"][-1] == {

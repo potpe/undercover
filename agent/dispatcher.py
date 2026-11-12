@@ -2,7 +2,7 @@
 
 import operator
 from dataclasses import dataclass
-from typing import Annotated, Any, Literal, TypedDict, cast
+from typing import Annotated, Any, Literal, NotRequired, TypedDict, cast
 
 from langchain_core.exceptions import ModelRateLimitError, ModelTimeoutError
 from langgraph.errors import NodeError
@@ -19,6 +19,7 @@ class WorkItem(TypedDict):
     claim_id: str
     run_id: int
     run_kind: RunKind
+    round_id: NotRequired[int | None]
 
 
 @dataclass(frozen=True)
@@ -102,6 +103,7 @@ def selected_work(run_id: int, run_kind: RunKind) -> list[WorkItem]:
             "claim_id": claim["claim_id"],
             "run_id": run_id,
             "run_kind": run_kind,
+            "round_id": response.json()["round_id"],
         }
         for claim in response.json()["claims"]
         if claim["status"] in ("waiting", "in_progress")
@@ -116,15 +118,14 @@ def run_dispatch(
     claim_ids: list[str] | None = None,
 ) -> DispatchState:
     """Fan out the selected claims with at most N active claim workers."""
-    ids = (
-        claim_ids
-        if claim_ids is not None
-        else [item["claim_id"] for item in selected_work(run_id, run_kind)]
+    claims: list[WorkItem] = (
+        selected_work(run_id, run_kind)
+        if claim_ids is None
+        else [
+            {"claim_id": claim_id, "run_id": run_id, "run_kind": run_kind}
+            for claim_id in claim_ids
+        ]
     )
-    claims: list[WorkItem] = [
-        {"claim_id": claim_id, "run_id": run_id, "run_kind": run_kind}
-        for claim_id in ids
-    ]
     initial: DispatchState = {
         "run_id": run_id,
         "run_kind": run_kind,

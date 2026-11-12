@@ -178,10 +178,63 @@ class RoundRecord(BaseModel):
     held_out_after: dict[str, float | None] | None
     verdict: Literal["kept", "rolled_back"] | None
     verdict_reason: str | None
+    finish_reason: str | None
     created_by: str
     created_at: str
     finished_at: str | None
     stopped_at: str | None
+    progress: int
+    cost: float
+    proposals: list[dict[str, Any]]
+
+
+class StartRoundRequest(BaseModel):
+    handler_id: str
+
+
+class RoundStageRequest(BaseModel):
+    stage: Literal["baseline", "working", "evaluating", "verdict"]
+    progress: int = Field(ge=0, le=3)
+
+
+class ConfigurationProposal(BaseModel):
+    instructions: str = Field(min_length=1)
+    model: str = Field(min_length=1)
+    reasoning_effort: str = Field(min_length=1)
+    reason: str = Field(min_length=1)
+
+
+class RecipeProposal(BaseModel):
+    recipe: str = Field(min_length=1)
+    reason: str = Field(min_length=1)
+
+
+class ProposalRequest(BaseModel):
+    payload: ConfigurationProposal | RecipeProposal
+
+
+class ProposalDecision(BaseModel):
+    proposal_id: int
+    decision: Literal["approve", "reject"]
+    reason: str
+
+
+class InternalProposalDecision(ProposalDecision):
+    handler_id: str
+
+
+class VerdictRequest(BaseModel):
+    failure: str | None
+
+
+class ImproverCallRequest(BaseModel):
+    call_id: str
+    model_name: str
+    reasoning_effort: str
+    prompt_tokens: int = Field(ge=0)
+    completion_tokens: int = Field(ge=0)
+    total_tokens: int = Field(ge=0)
+    cost: float = Field(ge=0)
 
 
 class RunRequest(BaseModel):

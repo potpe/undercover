@@ -32,8 +32,11 @@ from backend.evaluations import (
     create_evaluation,
     evaluation_record,
     list_evaluations,
+    save_evaluation_scores,
 )
 from backend.improvement import list_rounds
+from backend.improvement_budget import check_run
+from backend.improvement_routes import router as improvement_router
 from backend.models import (
     ActivityRequest,
     ClaimBundle,
@@ -96,6 +99,7 @@ async def lifespan(_: FastAPI) -> AsyncIterator[None]:
 
 
 app = FastAPI(title="UnderCover", lifespan=lifespan)
+app.include_router(improvement_router)
 
 
 def service_error(error: httpx.HTTPError) -> HTTPException:
@@ -354,6 +358,13 @@ def internal_get_run(run_id: int) -> RunRecord:
     return RunRecord(**get_run_or_404(run_id))
 
 
+@app.post("/api/internal/runs/{run_id}/budget", operation_id="check_claim_run_budget")
+def internal_check_claim_budget(run_id: int) -> dict[str, str]:
+    """Refuse a new claim model call after its round stops or exhausts budget."""
+    check_run(run_id, spending=True)
+    return {"status": "ok"}
+
+
 def get_run_or_404(run_id: int) -> dict[str, Any]:
     run = get_run(run_id)
     if run is None:
@@ -413,12 +424,16 @@ def internal_stop_run(run_id: int, request: FailureRequest) -> RunRecord:
 @app.post("/api/internal/runs/{run_id}/finish", operation_id="finish_run")
 def internal_finish_run(run_id: int) -> RunRecord:
     """Finish a run with a summary and totals built from its records."""
-    return RunRecord(**finish_run(run_id))
+    record = finish_run(run_id)
+    if record["kind"] == "evaluation":
+        save_evaluation_scores(run_id)
+    return RunRecord(**record)
 
 
 @app.post("/api/claims/{claim_id}/model-calls", operation_id="record_model_call")
 def model_call(claim_id: str, request: ModelCallRequest) -> ClaimBundle:
     """Record the exact OpenRouter usage reported for one model call."""
+    check_run(request.run_id)
     if not record_model_call(claim_id, request.model_dump()):
         raise HTTPException(status_code=404, detail="Claim not found")
     return claim(claim_id)
@@ -427,6 +442,7 @@ def model_call(claim_id: str, request: ModelCallRequest) -> ClaimBundle:
 @app.post("/api/claims/{claim_id}/work-periods", operation_id="record_work_period")
 def work_period(claim_id: str, request: WorkPeriodRequest) -> ClaimBundle:
     """Record one period of active agent work on a claim."""
+    check_run(request.run_id)
     if not record_work_period(claim_id, request.model_dump()):
         raise HTTPException(status_code=404, detail="Claim not found")
     return claim(claim_id)

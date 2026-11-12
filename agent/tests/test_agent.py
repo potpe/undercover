@@ -1,12 +1,20 @@
 from datetime import UTC, datetime
+from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
 from fastapi.testclient import TestClient
 from langchain_core.exceptions import ModelRateLimitError
 from langchain_core.messages import AIMessage
+from sqlalchemy import insert, update
 
 from agent import main
+from backend.database import (
+    configuration_versions_table,
+    connect,
+    settings_table,
+    timestamp,
+)
 from backend.main import app
 from backend.models import DecisionKind, DecisionRequest
 from backend.runs import run_usage
@@ -482,3 +490,84 @@ def test_model_uses_the_supplied_version(monkeypatch):
     free = {"model_name": "openrouter/free", "reasoning_effort": "default"}
     assert main.model(free).model_name == "openrouter/free"
     assert main.model(free).reasoning_effort is None
+
+
+def test_run_configuration_fetches_its_pinned_score_free_version(client, monkeypatch):
+    use_backend(monkeypatch)
+    monkeypatch.setenv("OPENROUTER_API_KEY", "stub-not-a-real-key")
+    first_run = create_run(client)
+    with connect() as connection:
+        connection.execute(
+            insert(configuration_versions_table).values(
+                version=2,
+                instructions="Version 2 uses a general evidence rule.",
+                model_name="openai/gpt-6-luna",
+                reasoning_effort="medium",
+                reason="Improve evidence handling",
+                proposed_by="improver",
+                approved_by="HND-01",
+                proposed_at=timestamp(),
+                approved_at=timestamp(),
+            )
+        )
+        connection.execute(
+            update(settings_table)
+            .where(settings_table.c.key == "current_configuration_version")
+            .values(data=2)
+        )
+    client.post("/api/internal/runs/stop-active")
+    second_response = client.post(
+        "/api/internal/dispatches",
+        json={
+            "concurrency": 3,
+            "configuration_version": None,
+            "model_name": "openai/gpt-6-luna",
+            "reasoning_effort": "medium",
+            "round_id": None,
+            "round_purpose": None,
+        },
+    )
+    assert second_response.status_code == 201
+    second_run = second_response.json()["run_id"]
+
+    first_configuration = main.run_configuration("CLM-1001", first_run)
+    second_configuration = main.run_configuration("CLM-1002", second_run)
+
+    assert first_configuration == {
+        "version": 1,
+        "instructions": Path("backend/agent_instructions.md").read_text(),
+        "model_name": "openai/gpt-6-luna",
+        "reasoning_effort": "low",
+        "round_id": None,
+    }
+    assert second_configuration == {
+        "version": 2,
+        "instructions": "Version 2 uses a general evidence rule.",
+        "model_name": "openai/gpt-6-luna",
+        "reasoning_effort": "medium",
+        "round_id": None,
+    }
+    assert main.model(first_configuration).reasoning_effort == "low"
+    assert main.model(second_configuration).reasoning_effort == "medium"
+
+    system_prompts = []
+    selected_configurations = []
+
+    class CapturingStubModel(StubModel):
+        def invoke(self, messages):
+            system_prompts.append(messages[0].content)
+            return super().invoke(messages)
+
+    def capture_model(configuration):
+        selected_configurations.append(configuration)
+        return CapturingStubModel(
+            messages=iter([AIMessage(content="Ready")]),
+            structured_decision=decision(420),
+        )
+
+    monkeypatch.setattr(main, "model", capture_model)
+    main.run_with_context("CLM-1002", "version-two-thread", second_run)
+    assert selected_configurations[0]["version"] == 2
+    assert selected_configurations[0]["model_name"] == "openai/gpt-6-luna"
+    assert selected_configurations[0]["reasoning_effort"] == "medium"
+    assert system_prompts == ["Version 2 uses a general evidence rule."]

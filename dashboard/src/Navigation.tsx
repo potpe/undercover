@@ -1,9 +1,11 @@
-export type View = "queue" | "scoreboard" | "configuration" | "settings";
+export type View =
+  "queue" | "scoreboard" | "configuration" | "improvement" | "settings";
 
 const pages: { view: View; label: string }[] = [
   { view: "queue", label: "Claims" },
   { view: "scoreboard", label: "Scoreboard" },
   { view: "configuration", label: "Configuration" },
+  { view: "improvement", label: "Improvement" },
   { view: "settings", label: "Settings" },
 ];
 

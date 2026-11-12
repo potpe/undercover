@@ -22,6 +22,7 @@ from sqlalchemy import (
     Text,
     UniqueConstraint,
     create_engine,
+    event,
     func,
     insert,
     inspect,
@@ -142,6 +143,8 @@ rounds_table = Table(
     Column("held_out_after", JSON),
     Column("verdict", String),
     Column("verdict_reason", Text),
+    Column("finish_reason", Text),
+    Column("progress", Integer, nullable=False, default=0),
     Column("created_by", String, nullable=False),
     Column("created_at", DateTime(timezone=True), nullable=False),
     Column("finished_at", DateTime(timezone=True)),
@@ -155,6 +158,7 @@ proposals_table = Table(
     Column("kind", String, nullable=False),
     Column("payload", JSON, nullable=False),
     Column("reason", Text, nullable=False),
+    Column("proposed_at", DateTime(timezone=True), nullable=False),
     Column("diff", JSON, nullable=False),
     Column("status", String, nullable=False),
     Column("decided_by", String),
@@ -216,6 +220,7 @@ runs_table = Table(
     Column("tiny", Boolean),
     Column("status", String, nullable=False),
     Column("summary", JSON),
+    Column("scores", JSON),
     Column("created_at", DateTime(timezone=True), nullable=False),
     Column("completed_at", DateTime(timezone=True)),
     Column("stopped_at", DateTime(timezone=True)),
@@ -242,6 +247,19 @@ judge_grades_table = Table(
     Column("same_grounds", Numeric),
     Column("same_section", Numeric),
     Column("judge_cost", Numeric, nullable=False),
+)
+improver_calls_table = Table(
+    "improver_calls",
+    metadata,
+    Column("call_id", String, primary_key=True),
+    Column("round_id", Integer, nullable=False),
+    Column("model_name", String, nullable=False),
+    Column("reasoning_effort", String, nullable=False),
+    Column("prompt_tokens", Integer, nullable=False),
+    Column("completion_tokens", Integer, nullable=False),
+    Column("total_tokens", Integer, nullable=False),
+    Column("cost", Numeric, nullable=False),
+    Column("created_at", DateTime(timezone=True), nullable=False),
 )
 model_calls_table = Table(
     "model_calls",
@@ -297,7 +315,13 @@ def create_db_engine(url: str) -> Engine:
             pool_size=1,
             max_overflow=1,
         )
-    return create_engine(url)
+    engine = create_engine(url)
+    event.listen(engine, "first_connect", sqlite_wal)
+    return engine
+
+
+def sqlite_wal(connection: Any, _record: Any) -> None:
+    connection.execute("PRAGMA journal_mode=WAL")
 
 
 @lru_cache

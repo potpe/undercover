@@ -38,6 +38,28 @@ function runRecord(kind: string, body: unknown) {
   };
 }
 
+async function roundResponse(
+  url: string,
+  body: unknown,
+  response: ServerResponse,
+): Promise<void> {
+  if (url === "/rounds") {
+    const created = await fetch("http://127.0.0.1:8000/api/internal/rounds", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    });
+    response.statusCode = created.ok ? 202 : created.status;
+    response.end(await created.text());
+    return;
+  }
+  const roundId = url.split("/")[2];
+  const current = await fetch(
+    `http://127.0.0.1:8000/api/internal/rounds/${roundId}`,
+  );
+  response.end(await current.text());
+}
+
 async function handleRequest(
   request: IncomingMessage,
   response: ServerResponse,
@@ -62,6 +84,8 @@ async function handleRequest(
       response.end(JSON.stringify(runRecord("dispatch", body)));
     } else if (url === "/evaluations") {
       response.end(JSON.stringify(runRecord("evaluation", body)));
+    } else if (url === "/rounds" || /^\/rounds\/\d+\/decision$/.test(url)) {
+      await roundResponse(url, body, response);
     } else if (url.endsWith("/work")) {
       response.end(JSON.stringify({ result: "Accepted" }));
     } else {

@@ -1,13 +1,16 @@
 import { useEffect, useState } from "react";
 import {
   getSettings,
+  getSettingChanges,
   saveSettings,
   type Handler,
   type PlatformSettings,
   type SettingsUpdate,
+  type SettingChange,
 } from "./api";
 import { ConfirmDialog } from "./ConfirmDialog";
 import type { Appearance } from "./appearance";
+import { SettingsAudit } from "./SettingsAudit";
 
 export function Settings({
   handler,
@@ -19,15 +22,19 @@ export function Settings({
   onAppearanceChange: (value: Appearance) => void;
 }>) {
   const [settings, setSettings] = useState<PlatformSettings | null>(null);
+  const [changes, setChanges] = useState<SettingChange[]>([]);
   const [message, setMessage] = useState("");
   const [error, setError] = useState("");
   const [confirm, setConfirm] = useState(false);
   const [busy, setBusy] = useState(false);
   useEffect(() => {
     let active = true;
-    getSettings()
-      .then((data) => {
-        if (active) setSettings(data);
+    Promise.all([getSettings(), getSettingChanges()])
+      .then(([data, audit]) => {
+        if (active) {
+          setSettings(data);
+          setChanges(audit);
+        }
       })
       .catch(() => {
         if (active) setError("We could not load settings. Try again.");
@@ -50,7 +57,10 @@ export function Settings({
       evaluation_concurrency: settings.evaluation_concurrency,
     };
     try {
-      setSettings(await saveSettings(values));
+      const updated = await saveSettings(values);
+      const audit = await getSettingChanges();
+      setSettings(updated);
+      setChanges(audit);
       setMessage("Settings saved.");
     } catch (cause) {
       setError(
@@ -186,6 +196,7 @@ export function Settings({
           <option value="dark">Dark</option>
         </select>
       </section>
+      <SettingsAudit changes={changes} />
       {confirm ? (
         <ConfirmDialog
           title="Change platform settings?"

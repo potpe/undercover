@@ -56,6 +56,21 @@ function mockFetch() {
           headers: { "Content-Type": "application/json" },
         }),
       );
+    if (url === "/api/settings/changes")
+      return Promise.resolve(
+        new Response(
+          JSON.stringify([
+            {
+              key: "approval_limit",
+              old_value: 1000,
+              new_value: 1100,
+              changed_by: "HND-01",
+              changed_at: "2026-11-12T12:00:00Z",
+            },
+          ]),
+          { status: 200, headers: { "Content-Type": "application/json" } },
+        ),
+      );
     return Promise.resolve(new Response("{}", { status: 404 }));
   });
   vi.stubGlobal("fetch", fetchMock);

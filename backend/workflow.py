@@ -11,6 +11,7 @@ from backend.database import (
     settings_table,
     timestamp,
 )
+from backend.improvement_budget import check_run_connection
 from backend.models import DecisionRequest, PaymentRequest
 
 
@@ -49,6 +50,7 @@ def claim_row(connection: Connection, claim_id: str) -> RowMapping:
     )
     if row is None:
         raise HTTPException(status_code=404, detail="Claim not found")
+    check_run_connection(connection, row["evaluation_run_id"])
     return row
 
 

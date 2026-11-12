@@ -17,6 +17,7 @@ from backend.database import (
     run_claims_table,
     runs_table,
 )
+from backend.improvement_budget import check_run, check_run_connection
 
 JUDGE_ORIGIN = os.getenv("JUDGE_ORIGIN", "https://openrouter.ai").rstrip("/")
 GRADES = ("F", "C", "B", "A")
@@ -135,6 +136,7 @@ def grading_items(run_id: int) -> list[dict[str, Any]]:
         return [
             {
                 "claim_id": row["claim_id"],
+                "run_id": run_id,
                 "state": {
                     "handler": {
                         key: by_source[row["source_claim_id"]][key]
@@ -154,6 +156,10 @@ def grading_items(run_id: int) -> list[dict[str, Any]]:
 
 def grade_item(item: dict[str, Any]) -> dict[str, Any]:
     result = ungraded()
+    try:
+        check_run(item["run_id"], spending=True)
+    except Exception:
+        return {"claim_id": item["claim_id"], **result}
     if not os.getenv("MODEL_NAME"):
         if item["state"]["agent"]["decision"] is None:
             result.update(grade=0.0, letter="F", same_grounds=0.0, same_section=0.0)
@@ -168,12 +174,14 @@ def grade_item(item: dict[str, Any]) -> dict[str, Any]:
 def grade_evaluation(run_id: int) -> None:
     """Grade an evaluation in parallel without holding a database connection."""
     with _finish_locks.setdefault(run_id, Lock()):
+        check_run(run_id)
         items = grading_items(run_id)
         if not items:
             return
         with ThreadPoolExecutor(max_workers=len(items)) as pool:
             results = list(pool.map(grade_item, items))
         with connect() as connection:
+            check_run_connection(connection, run_id)
             connection.execute(
                 insert(judge_grades_table),
                 [{"run_id": run_id, **result} for result in results],

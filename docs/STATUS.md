@@ -1,12 +1,12 @@
 # Status
 
-The swarm and scoreboard implementation is complete. Improvement Phases 1–2 add Supabase password sign-in, handler permissions, configuration/recipe version 1, version-pinned runs, audited settings and browser appearance. Judge/improver phases remain in progress. Offline checks pass; hosted acceptance has remaining provider/connection limitations documented below.
+The swarm, scoreboard and Improvement Phases 1–4 are implemented and pass the offline gate. This includes Supabase password sign-in, handler permissions, versioned configuration/recipes, judging, durable improvement rounds, budget controls and the Improvement page. Hosted connection limitations remain documented below. No live improvement round was run.
 
-- `backend/`: FastAPI and SQLAlchemy Core on SQLite offline or Supabase Postgres. APIs cover claims, document reads, deterministic payouts, dispatches, evaluations, usage/time ledgers, decisions, sign-off, payment and record-built summaries/scores. The backend enforces the $1,000 sign-off rule and idempotent writes. Handler sources and decisions are backend-only.
-- `agent/`: a synchronous durable claim graph plus a model-free LangGraph dispatcher using `Send`, N-way concurrency and targeted retries. Claim threads and attempts survive stopped runs. A process-wide synchronous pool caps checkpoint connections at four with a separate saver per claim. Langfuse keeps claim/thread sessions and adds run tags.
-- `agent/service.py`: a separate FastAPI service on port 8002 starts dispatches/evaluations, works named claims and resumes sign-offs. One non-blocking slot prevents concurrent runs. Startup marks stale runs stopped and recovers saved sign-offs. `uv run -m agent CLM-1001` works one claim without a run; bare CLI queue execution is removed.
-- `dashboard/`: every page requires a Supabase Auth session, and the header shows the signed-in handler with sign-out. The queue starts N=1–25 dispatches (default 3), with claim states/attempts, record-built summaries and model/active/wall time. Scoreboard starts whole/tiny evaluations, lists newest first with every measure, and links handler/agent comparisons to isolated copy pages with no run/sign-off controls. Instructions show only the claim agent. Held payouts use the signed-in identity; handlers without over-limit permission see why they cannot sign off.
-- `e2e/`: ten Playwright tests sign in through a local asymmetric-key Supabase Auth stand-in on port 8005. They cover queue, instructions, claim work/decisions, sign-off notification, dispatch summaries, N payloads, evaluation payloads and an API-played scoreboard evaluation. Tests use isolated SQLite and the port-8003 agent stand-in, never hosted services or models.
+- `backend/`: FastAPI and SQLAlchemy Core on SQLite offline or Supabase Postgres. APIs cover claims, judging, versioned configurations/recipes, settings/audits, improvement rounds/proposals, spending and verdicts as well as dispatches, evaluations and claim operations. The backend enforces handler permissions, the approval limit, and idempotent writes. Handler sources and answer keys stay backend-only.
+- `agent/`: a synchronous durable claim graph, model-free LangGraph dispatcher and separate recipe-guided improver. Claim threads and round approvals use synchronous checkpoints; the shared Postgres pool remains capped at four connections, with a separate saver per claim or round. Langfuse groups improver stretches by round and tags round evaluations alongside their run tags.
+- `agent/service.py`: a separate FastAPI service on port 8002 starts dispatches, evaluations and improvement rounds, works named claims and resumes sign-offs/proposals. One named, non-blocking slot prevents competing work; approval waits release it. Startup stops interrupted work and resumes recorded round decisions and signed-off claims. `uv run -m agent CLM-1001` works one claim without a run; bare CLI queue execution is removed.
+- `dashboard/`: every page requires a Supabase Auth session, and the header shows the signed-in handler with sign-out. The dashboard includes Claims, Scoreboard, Configuration, Improvement and Settings. Improvement shows round stages/spend, proposal review, audit history, held-out scores and an accessible version chart. Senior-only actions are explained to other handlers; held payouts use the signed-in identity.
+- `e2e/`: fourteen Playwright tests sign in through a local asymmetric-key Supabase Auth stand-in on port 8005. They cover queue, claim work/decisions, sign-off, dispatch/evaluation payloads, scoreboard copies, proposal approval and senior permissions. Tests use isolated SQLite and local service/auth stand-ins, never hosted services or models.
 
 ## Set up
 
@@ -43,6 +43,8 @@ On Claims, choose Agents at once from 1 to 25 (default 3) and Start dispatch. A 
 
 On Scoreboard, choose Evaluation set or Held-out set, the whole set or its five tiny claims, and N. Start evaluations one at a time relative to dispatches. Open an evaluation for handler/agent decisions, payouts, reasons, misses and per-claim cost/time. A stopped run remains labelled stopped; undecided copies count as referrals.
 
+On Improvement, a senior handler can start or stop one round, review configuration/recipe proposals, approve or reject with a reason, and inspect round history and held-out version scores. Approval waits survive service restart. The complete round loop is verified offline with stubs; do not run live rounds as part of the offline check.
+
 Over-limit operational approvals wait for sign-off. Signing off saves the handler/time, shows In progress, then resumes the same thread and pays once. Evaluation approvals held for sign-off count as finished, stay unpaid and cannot be signed off.
 
 With the services running, `uv run -m agent CLM-1001` works only that named claim with no dispatch/evaluation.
@@ -56,6 +58,8 @@ npm run check
 This runs Ruff, Pyright, pytest with at least 80% coverage, Prettier, ESLint, tsc, Vitest with at least 80% coverage, and Playwright. Stop development services first so Playwright can start isolated services.
 
 ## Verification
+
+Improvement Phase 4: durable round orchestration, separate improver tools and checkpoint, proposal approval/rejection, candidate evaluation/verdicts, budget enforcement, Langfuse round tracing and the Improvement page pass the local stub/SQLite tests. With root `.env` moved aside and restored, `npm run check` passed 201 Python tests at 93.68% coverage, 45 Vitest tests at 87.89% statement coverage and 14 Playwright tests. No hosted service, model, live round or reseed was used.
 
 Improvement Phase 3: Jev grading runs concurrently in the backend through one SDK call site, using a 10-second timeout and no retries. Grades/check probabilities and separate judge costs are persisted; failed grading is excluded from averages, undecided claims receive F/0, and free mode leaves every claim ungraded. Scoreboard shows grades and handler references. The no-`.env` gate passes 127 Python tests at 93.85% coverage, 38 Vitest tests at 89.16% statement coverage and 12 Playwright tests; the real Decisions SDK talks only to a local judge stand-in.
 

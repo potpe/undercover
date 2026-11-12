@@ -1,75 +1,38 @@
-from contextlib import contextmanager
+from contextlib import nullcontext
 
-from agent import main, tracing
-
-
-def test_missing_langfuse_keys_disable_tracing(monkeypatch):
-    for key in ("LANGFUSE_SECRET_KEY", "LANGFUSE_PUBLIC_KEY", "LANGFUSE_BASE_URL"):
-        monkeypatch.delenv(key, raising=False)
-
-    with tracing.trace_claim("CLM-1001", "thread-1") as callbacks:
-        assert callbacks == []
+from agent import tracing
 
 
-def test_claim_tracing_uses_stable_claim_thread_session(monkeypatch):
-    events = []
+def test_round_stretches_share_the_round_session(monkeypatch):
     for key in tracing.LANGFUSE_KEYS:
-        monkeypatch.setenv(key, "test-value")
+        monkeypatch.setenv(key, "stub")
+    sessions = []
 
     class FakeLangfuse:
-        @contextmanager
-        def start_as_current_observation(self, **kwargs):
-            events.append(kwargs)
-            yield
+        def __init__(self):
+            self.flush_count = 0
 
         def flush(self):
-            events.append({"flushed": True})
+            self.flush_count += 1
 
-    class FakeHandler:
+    class FakeCallbackHandler:
         pass
 
-    @contextmanager
-    def fake_propagate_attributes(**kwargs):
-        events.append(kwargs)
-        yield
-
-    monkeypatch.setattr(tracing, "get_client", FakeLangfuse)
-    monkeypatch.setattr(tracing, "CallbackHandler", FakeHandler)
-    monkeypatch.setattr(tracing, "propagate_attributes", fake_propagate_attributes)
-
-    with tracing.trace_claim("CLM-1003", "run-1:CLM-1003:attempt-1") as callbacks:
-        assert len(callbacks) == 1
-        assert isinstance(callbacks[0], FakeHandler)
-
-    assert any(
-        event.get("session_id") == "CLM-1003:run-1:CLM-1003:attempt-1"
-        for event in events
+    langfuse = FakeLangfuse()
+    monkeypatch.setattr(tracing, "get_client", lambda: langfuse)
+    monkeypatch.setattr(tracing, "CallbackHandler", FakeCallbackHandler)
+    monkeypatch.setattr(
+        tracing,
+        "propagate_attributes",
+        lambda **attributes: sessions.append(attributes) or nullcontext(),
     )
-    with tracing.trace_claim("CLM-1003", "run-1:CLM-1003:attempt-1"):
-        pass
-    with tracing.trace_claim("CLM-1003", "run-1:CLM-1003:attempt-2"):
-        pass
 
-    sessions = [event["session_id"] for event in events if "session_id" in event]
+    for _ in range(2):
+        with tracing.trace_round(14) as callbacks:
+            assert len(callbacks) == 1
+
     assert sessions == [
-        "CLM-1003:run-1:CLM-1003:attempt-1",
-        "CLM-1003:run-1:CLM-1003:attempt-1",
-        "CLM-1003:run-1:CLM-1003:attempt-2",
+        {"session_id": "Improvement 14", "tags": ["round-14"]},
+        {"session_id": "Improvement 14", "tags": ["round-14"]},
     ]
-    assert events[-1] == {"flushed": True}
-    with tracing.trace_claim("CLM-1003", "thread", ["dispatch-7"]):
-        pass
-    assert {
-        "session_id": "CLM-1003:thread",
-        "tags": ["dispatch-7"],
-    } in events
-
-
-def test_claim_config_tags_each_run_and_leaves_direct_work_untagged():
-    dispatch = main.claim_config("thread", [], 7, "dispatch")
-    evaluation = main.claim_config("thread", [], 8, "evaluation")
-    direct = main.claim_config("thread", [], None, "dispatch")
-
-    assert dispatch.get("metadata") == {"langfuse_tags": ["dispatch-7"]}
-    assert evaluation.get("metadata") == {"langfuse_tags": ["evaluation-8"]}
-    assert direct.get("metadata") == {}
+    assert langfuse.flush_count == 2

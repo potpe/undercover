@@ -3,7 +3,7 @@
 from typing import Any
 
 from fastapi import HTTPException
-from sqlalchemy import insert, select
+from sqlalchemy import insert, select, update
 
 from backend.database import (
     claims_table,
@@ -15,6 +15,7 @@ from backend.database import (
     runs_table,
     timestamp,
 )
+from backend.improvement_budget import authorize_evaluation
 from backend.models import CreateEvaluationRequest
 from backend.runs import inserted_id, require_run, selected_configuration
 
@@ -77,6 +78,8 @@ def create_evaluation(request: CreateEvaluationRequest) -> dict[str, Any]:
                 claim for claim in sources if by_source[claim["claim_id"]]["tiny"]
             ]
         sources.sort(key=lambda claim: (claim["submitted_on"], claim["claim_id"]))
+        if round_id is not None:
+            authorize_evaluation(connection, round_id, version["version"], len(sources))
         result = connection.execute(
             insert(runs_table).values(
                 kind="evaluation",
@@ -258,3 +261,20 @@ def list_evaluations() -> list[dict[str, Any]]:
             .all()
         )
     return [evaluation_record(run_id) for run_id in ids]
+
+
+def save_evaluation_scores(run_id: int) -> None:
+    record = evaluation_record(run_id)
+    measures = record["measures"]
+    scores = {
+        "accuracy": measures["accuracy"],
+        "grade": measures["grade"],
+        "cost_per_claim": measures["model_cost_per_claim"],
+        "seconds_per_claim": measures["seconds_per_claim"],
+    }
+    with connect() as connection:
+        connection.execute(
+            update(runs_table)
+            .where(runs_table.c.run_id == run_id)
+            .values(scores=scores)
+        )

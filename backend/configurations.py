@@ -13,6 +13,7 @@ from backend.database import (
     recipe_versions_table,
     settings_table,
 )
+from backend.version_scores import average_scores_in
 
 
 def text_diff(old: str, new: str) -> list[dict[str, str]]:
@@ -94,7 +95,7 @@ def configuration_record(connection: Connection, row: RowMapping) -> dict[str, A
         "diff": (
             text_diff(previous["instructions"], row["instructions"]) if previous else []
         ),
-        "held_out_scores": None,
+        "held_out_scores": average_scores_in(connection, row["version"], "held_out"),
     }
 
 

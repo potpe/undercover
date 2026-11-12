@@ -47,6 +47,11 @@ def flattened(value: dict[str, Any], prefix: str = "") -> dict[str, Any]:
 
 def update_settings(values: dict[str, Any], handler_id: str) -> dict[str, Any]:
     with connect() as connection:
+        connection.execute(
+            select(settings_table)
+            .where(settings_table.c.key.in_(("company", "improvement")))
+            .with_for_update()
+        ).all()
         before = settings_record(connection)
         after = {key: values[key] for key in values}
         old_flat = flattened({key: before[key] for key in after})
