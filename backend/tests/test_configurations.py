@@ -1,5 +1,6 @@
 from pathlib import Path
 
+import pytest
 from sqlalchemy import insert, update
 
 from backend.configurations import text_diff
@@ -52,6 +53,24 @@ def test_diff_uses_difflib_additions_and_removals():
         {"kind": "removed", "text": "two"},
         {"kind": "added", "text": "three"},
     ]
+
+
+@pytest.mark.parametrize(
+    "line", ["++ new rule", "-- old restriction", "---", "@@ rule"]
+)
+def test_diff_preserves_content_that_resembles_metadata(line):
+    assert text_diff("Keep rule\n", f"Keep rule\n{line}\n") == [
+        {"kind": "context", "text": "Keep rule"},
+        {"kind": "added", "text": line},
+    ]
+    assert text_diff(f"Keep rule\n{line}\n", "Keep rule\n") == [
+        {"kind": "context", "text": "Keep rule"},
+        {"kind": "removed", "text": line},
+    ]
+
+
+def test_diff_without_changes_has_no_metadata():
+    assert text_diff("---\n++ rule\n", "---\n++ rule\n") == []
 
 
 def test_configuration_and_recipe_history_return_exact_diffs(client):

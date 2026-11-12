@@ -59,6 +59,8 @@ This runs Ruff, Pyright, pytest with at least 80% coverage, Prettier, ESLint, ts
 
 ## Verification
 
+Branch review fixes: same-user sign-in/token-refresh events preserve unsaved forms and dialogs while updating the bearer token; identity changes still clear the previous handler and page state. Configuration/recipe diffs retain content resembling diff headers. Regression tests cover both fixes; the offline gate passes 206 Python tests at 93.69% coverage, 48 Vitest tests at 88.32% statement coverage and 14 Playwright tests with root `.env` absent and safely restored. Both findings are marked fixed in `docs/BUGS.md`.
+
 Improvement Phase 4: durable round orchestration, separate improver tools and checkpoint, proposal approval/rejection, candidate evaluation/verdicts, budget enforcement, Langfuse round tracing and the Improvement page pass the local stub/SQLite tests. With root `.env` moved aside and restored, `npm run check` passed 201 Python tests at 93.68% coverage, 45 Vitest tests at 87.89% statement coverage and 14 Playwright tests. No hosted service, model, live round or reseed was used.
 
 Improvement Phase 3: Jev grading runs concurrently in the backend through one SDK call site, using a 10-second timeout and no retries. Grades/check probabilities and separate judge costs are persisted; failed grading is excluded from averages, undecided claims receive F/0, and free mode leaves every claim ungraded. Scoreboard shows grades and handler references. The no-`.env` gate passes 127 Python tests at 93.85% coverage, 38 Vitest tests at 89.16% statement coverage and 12 Playwright tests; the real Decisions SDK talks only to a local judge stand-in.

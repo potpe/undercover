@@ -190,20 +190,34 @@ export function App() {
 
   useEffect(() => {
     let active = true;
+    let currentUser: Session["user"] | null = null;
+    function updateSession(nextSession: Session | null) {
+      if (!active) return;
+      const nextUser = nextSession?.user ?? null;
+      if (
+        currentUser?.id !== nextUser?.id ||
+        currentUser?.email !== nextUser?.email
+      ) {
+        setHandler(null);
+        setAuthError("");
+        setSelectedClaim(null);
+        setView("queue");
+      }
+      currentUser = nextUser;
+      setSession(nextSession);
+    }
     void supabase.auth
       .getSession()
       .then(({ data }) => {
-        if (active) setSession(data.session);
+        updateSession(data.session);
       })
       .catch(() => {
-        if (active) setSession(null);
+        updateSession(null);
       });
     const {
       data: { subscription },
     } = supabase.auth.onAuthStateChange((_event, nextSession) => {
-      setHandler(null);
-      setAuthError("");
-      setSession(nextSession);
+      updateSession(nextSession);
     });
     return () => {
       active = false;
@@ -213,7 +227,12 @@ export function App() {
 
   useEffect(() => {
     setAccessToken(session?.access_token ?? null);
-    if (!session) return;
+  }, [session?.access_token]);
+
+  const userId = session?.user.id;
+  const userEmail = session?.user.email;
+  useEffect(() => {
+    if (!userId && !userEmail) return;
     let active = true;
     getCurrentHandler()
       .then((current) => {
@@ -230,7 +249,7 @@ export function App() {
     return () => {
       active = false;
     };
-  }, [session]);
+  }, [userId, userEmail]);
 
   if (session === undefined) return <p role="status">Checking your sign-in…</p>;
   if (!session) return <SignIn onSignedIn={setSession} />;

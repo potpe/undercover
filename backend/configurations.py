@@ -1,6 +1,7 @@
 """Backend-owned claim configuration and improver recipe versions."""
 
 import difflib
+from itertools import islice
 from typing import Any
 
 from fastapi import HTTPException
@@ -19,10 +20,9 @@ from backend.version_scores import average_scores_in
 def text_diff(old: str, new: str) -> list[dict[str, str]]:
     """Return readable added, removed and context lines for two texts."""
     lines = []
-    for line in difflib.unified_diff(
-        old.splitlines(), new.splitlines(), lineterm="", n=3
-    ):
-        if line.startswith(("---", "+++", "@@")):
+    diff = difflib.unified_diff(old.splitlines(), new.splitlines(), lineterm="", n=3)
+    for line in islice(diff, 2, None):
+        if line.startswith("@@"):
             continue
         kind = "context"
         text = line
