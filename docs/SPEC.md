@@ -8,6 +8,8 @@ UnderCover sells travel insurance on three plans: Economy, Premium and First. Ou
 
 ## The agent harness
 
+Agent-side backend requests require `UNDERCOVER_API_KEY` in `X-API-Key`. Shared claim reads accept this key or a signed-in handler. Dashboard-only reads and actions require a signed-in handler; the key never grants a handler's identity or permissions. Health checks remain public. The backend can start without a configured key, but agent-only requests are refused and the agent service cannot start.
+
 The UnderCover Agent works the queue the way a handler does. A dispatch covers every waiting claim and every claim left in progress, oldest submitted first, with up to N claim agents at once. Code chooses and tracks that work without a model. Each claim uses its own claim graph and thread, with no earlier claims in its context. A named waiting claim can also be run on its own without a dispatch.
 
 For each claim the graph should:
@@ -51,6 +53,6 @@ Everything is in `data/`, described in `data/README.md`: the claims queue, the p
 
 ## Not for now
 
-- No sign-in. Everyone who uses the screens sees everything.
+- No self-service sign-up. Supabase Auth sign-in identifies the existing handlers.
 - No real payments.
 - No messages to customers.

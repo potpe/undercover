@@ -328,12 +328,9 @@ export function setAccessToken(token: string | null) {
 }
 
 export async function request<T>(path: string, init?: RequestInit): Promise<T> {
-  let requestInit = init;
-  if (init) {
-    const headers = new Headers(init.headers);
-    if (accessToken) headers.set("Authorization", `Bearer ${accessToken}`);
-    requestInit = { ...init, headers };
-  }
+  const headers = new Headers(init?.headers);
+  if (accessToken) headers.set("Authorization", `Bearer ${accessToken}`);
+  const requestInit = { ...init, headers };
   const response = await fetch(path, requestInit);
   if (!response.ok) {
     const body = (await response.json()) as { detail?: unknown };

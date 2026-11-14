@@ -17,9 +17,52 @@ from backend.workflow import record_decision, record_payment
 
 
 def use_backend(monkeypatch):
-    monkeypatch.setattr(main, "backend", lambda: TestClient(backend_main.app))
-    monkeypatch.setattr(service, "backend", lambda: TestClient(backend_main.app))
-    monkeypatch.setattr(dispatcher, "backend", lambda: TestClient(backend_main.app))
+    monkeypatch.setattr(
+        main,
+        "backend",
+        lambda: TestClient(
+            backend_main.app,
+            headers={
+                "X-API-Key": "undercover-e2e-agent-key-32-characters",
+            },
+        ),
+    )
+    monkeypatch.setattr(
+        service,
+        "backend",
+        lambda: TestClient(
+            backend_main.app,
+            headers={
+                "X-API-Key": "undercover-e2e-agent-key-32-characters",
+            },
+        ),
+    )
+    monkeypatch.setattr(
+        dispatcher,
+        "backend",
+        lambda: TestClient(
+            backend_main.app,
+            headers={
+                "X-API-Key": "undercover-e2e-agent-key-32-characters",
+            },
+        ),
+    )
+
+
+def test_service_lifespan_requires_key_before_recovery(monkeypatch):
+    calls = []
+    monkeypatch.setattr(service, "recover_work", lambda: calls.append("recover"))
+    monkeypatch.delenv("UNDERCOVER_API_KEY", raising=False)
+    with (
+        pytest.raises(RuntimeError, match="UNDERCOVER_API_KEY is missing"),
+        TestClient(service.app),
+    ):
+        pass
+    assert calls == []
+
+    monkeypatch.setenv("UNDERCOVER_API_KEY", "undercover-e2e-agent-key-32-characters")
+    with TestClient(service.app):
+        assert calls == ["recover"]
 
 
 def only_claims(*claim_ids):

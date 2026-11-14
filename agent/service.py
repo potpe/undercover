@@ -1,6 +1,7 @@
 """The UnderCover Agent's separate web service and claim-work harness."""
 
 import contextvars
+import os
 import time
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
@@ -501,6 +502,8 @@ def resume_round(
 
 @asynccontextmanager
 async def lifespan(_: FastAPI) -> AsyncIterator[None]:
+    if not os.getenv("UNDERCOVER_API_KEY"):
+        raise RuntimeError("UNDERCOVER_API_KEY is missing")
     for attempt in range(STARTUP_ATTEMPTS):
         try:
             recover_work()

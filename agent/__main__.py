@@ -5,7 +5,7 @@ import uuid
 
 from dotenv import load_dotenv
 
-from agent.main import backend
+from agent.main import backend, run_with_context
 
 
 def main() -> None:
@@ -16,10 +16,11 @@ def main() -> None:
     thread_id = f"cli-{uuid.uuid4()}"
     with backend() as client:
         response = client.post(
-            f"/api/claims/{args.claim_id}/run", json={"thread_id": thread_id}
+            f"/api/internal/claims/{args.claim_id}/work",
+            json={"thread_id": thread_id},
         )
     response.raise_for_status()
-    print(f"Claim {args.claim_id} started.")
+    print(run_with_context(args.claim_id, thread_id))
 
 
 if __name__ == "__main__":

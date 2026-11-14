@@ -59,7 +59,16 @@ class StubModel:
 
 
 def use_backend(monkeypatch):
-    monkeypatch.setattr(main, "backend", lambda: TestClient(app))
+    monkeypatch.setattr(
+        main,
+        "backend",
+        lambda: TestClient(
+            app,
+            headers={
+                "X-API-Key": "undercover-e2e-agent-key-32-characters",
+            },
+        ),
+    )
 
 
 def create_run(client):

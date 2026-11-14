@@ -23,7 +23,16 @@ from backend.models import InternalProposalDecision
 
 def stub_claims(monkeypatch):
     local_api(monkeypatch)
-    monkeypatch.setattr(dispatcher, "backend", lambda: TestClient(app))
+    monkeypatch.setattr(
+        dispatcher,
+        "backend",
+        lambda: TestClient(
+            app,
+            headers={
+                "X-API-Key": "undercover-e2e-agent-key-32-characters",
+            },
+        ),
+    )
 
     def claim(claim_id, thread_id, run_id, run_kind):
         service.post_backend(

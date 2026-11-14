@@ -60,9 +60,36 @@ def approval(payout=420):
 
 
 def use_backend(monkeypatch):
-    monkeypatch.setattr(main, "backend", lambda: TestClient(backend_main.app))
-    monkeypatch.setattr(service, "backend", lambda: TestClient(backend_main.app))
-    monkeypatch.setattr(dispatcher, "backend", lambda: TestClient(backend_main.app))
+    monkeypatch.setattr(
+        main,
+        "backend",
+        lambda: TestClient(
+            backend_main.app,
+            headers={
+                "X-API-Key": "undercover-e2e-agent-key-32-characters",
+            },
+        ),
+    )
+    monkeypatch.setattr(
+        service,
+        "backend",
+        lambda: TestClient(
+            backend_main.app,
+            headers={
+                "X-API-Key": "undercover-e2e-agent-key-32-characters",
+            },
+        ),
+    )
+    monkeypatch.setattr(
+        dispatcher,
+        "backend",
+        lambda: TestClient(
+            backend_main.app,
+            headers={
+                "X-API-Key": "undercover-e2e-agent-key-32-characters",
+            },
+        ),
+    )
 
 
 def create_one_claim_dispatch(client, claim_id):
@@ -178,6 +205,7 @@ def test_resume_failure_does_not_reopen_a_paid_claim(client, monkeypatch):
 
 def test_startup_recovery_retries_until_backend_is_ready(monkeypatch):
     calls = []
+    monkeypatch.setenv("UNDERCOVER_API_KEY", "undercover-e2e-agent-key-32-characters")
 
     def recover_with_initial_outage():
         calls.append("recover")

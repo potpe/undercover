@@ -7,7 +7,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy import select
 
 from backend import agent_service
-from backend.auth import current_handler, senior_handler
+from backend.auth import agent_key, current_handler, senior_handler
 from backend.database import connect, recipe_versions_table
 from backend.improvement import (
     create_round,
@@ -92,27 +92,42 @@ def decision(round_id: int, request: ProposalDecision, handler: Senior) -> Round
 
 
 @router.post(
-    "/api/internal/rounds", operation_id="create_improvement_round", status_code=201
+    "/api/internal/rounds",
+    operation_id="create_improvement_round",
+    status_code=201,
+    dependencies=[Depends(agent_key)],
 )
 def internal_create(request: StartRoundRequest) -> RoundRecord:
     """Create the service's round with an immutable settings snapshot."""
     return RoundRecord(**create_round(request.handler_id))
 
 
-@router.post("/api/internal/rounds/recover", operation_id="recover_improvement_rounds")
+@router.post(
+    "/api/internal/rounds/recover",
+    operation_id="recover_improvement_rounds",
+    dependencies=[Depends(agent_key)],
+)
 def internal_recover() -> dict[str, Any]:
     """Stop interrupted work but preserve durable approval waits."""
     recover_rounds()
     return {"rounds": [item for item in list_rounds() if item["status"] == "open"]}
 
 
-@router.get("/api/internal/rounds/{round_id}", operation_id="get_service_round")
+@router.get(
+    "/api/internal/rounds/{round_id}",
+    operation_id="get_service_round",
+    dependencies=[Depends(agent_key)],
+)
 def internal_detail(round_id: int) -> RoundRecord:
     """Return the stored round for service orchestration."""
     return RoundRecord(**get_round(round_id))
 
 
-@router.get("/api/internal/rounds/{round_id}/recipe", operation_id="get_round_recipe")
+@router.get(
+    "/api/internal/rounds/{round_id}/recipe",
+    operation_id="get_round_recipe",
+    dependencies=[Depends(agent_key)],
+)
 def internal_recipe(round_id: int) -> dict[str, Any]:
     """Return the recipe version frozen for this round."""
     record = get_round(round_id)
@@ -126,14 +141,20 @@ def internal_recipe(round_id: int) -> dict[str, Any]:
 
 
 @router.get(
-    "/api/internal/rounds/{round_id}/results", operation_id="read_improver_results"
+    "/api/internal/rounds/{round_id}/results",
+    operation_id="read_improver_results",
+    dependencies=[Depends(agent_key)],
 )
 def internal_results(round_id: int) -> dict[str, Any]:
     """Return evaluation detail and held-out aggregate scores only."""
     return read_results(round_id)
 
 
-@router.post("/api/internal/rounds/{round_id}/check", operation_id="check_round_budget")
+@router.post(
+    "/api/internal/rounds/{round_id}/check",
+    operation_id="check_round_budget",
+    dependencies=[Depends(agent_key)],
+)
 def internal_check(round_id: int) -> RoundRecord:
     """Refuse new round work after stopping or spending its limit."""
     with connect() as connection:
@@ -141,7 +162,11 @@ def internal_check(round_id: int) -> RoundRecord:
     return RoundRecord(**get_round(round_id))
 
 
-@router.post("/api/internal/rounds/{round_id}/stage", operation_id="record_round_stage")
+@router.post(
+    "/api/internal/rounds/{round_id}/stage",
+    operation_id="record_round_stage",
+    dependencies=[Depends(agent_key)],
+)
 def internal_stage(round_id: int, request: RoundStageRequest) -> RoundRecord:
     """Record service progress without changing protected settings."""
     values: dict[str, Any] = request.model_dump()
@@ -155,7 +180,9 @@ def internal_stage(round_id: int, request: RoundStageRequest) -> RoundRecord:
 
 
 @router.post(
-    "/api/internal/rounds/{round_id}/proposal", operation_id="record_improver_proposal"
+    "/api/internal/rounds/{round_id}/proposal",
+    operation_id="record_improver_proposal",
+    dependencies=[Depends(agent_key)],
 )
 def internal_proposal(round_id: int, request: ProposalRequest) -> RoundRecord:
     """Record a validated proposal waiting for a handler."""
@@ -168,7 +195,9 @@ def internal_proposal(round_id: int, request: ProposalRequest) -> RoundRecord:
 
 
 @router.post(
-    "/api/internal/rounds/{round_id}/decision", operation_id="record_proposal_decision"
+    "/api/internal/rounds/{round_id}/decision",
+    operation_id="record_proposal_decision",
+    dependencies=[Depends(agent_key)],
 )
 def internal_decision(round_id: int, request: InternalProposalDecision) -> RoundRecord:
     """Record the service-accepted handler decision before checkpoint resume."""
@@ -178,6 +207,7 @@ def internal_decision(round_id: int, request: InternalProposalDecision) -> Round
 @router.post(
     "/api/internal/rounds/{round_id}/apply/{kind}",
     operation_id="apply_approved_proposal",
+    dependencies=[Depends(agent_key)],
 )
 def internal_apply(round_id: int, kind: str) -> RoundRecord:
     """Create a version only from the round's approved proposal."""
@@ -187,7 +217,9 @@ def internal_apply(round_id: int, kind: str) -> RoundRecord:
 
 
 @router.post(
-    "/api/internal/rounds/{round_id}/verdict", operation_id="record_round_verdict"
+    "/api/internal/rounds/{round_id}/verdict",
+    operation_id="record_round_verdict",
+    dependencies=[Depends(agent_key)],
 )
 def internal_verdict(round_id: int, request: VerdictRequest) -> RoundRecord:
     """Keep or roll back the candidate using the backend business rule."""
@@ -195,7 +227,9 @@ def internal_verdict(round_id: int, request: VerdictRequest) -> RoundRecord:
 
 
 @router.post(
-    "/api/internal/rounds/{round_id}/finish", operation_id="finish_improvement_round"
+    "/api/internal/rounds/{round_id}/finish",
+    operation_id="finish_improvement_round",
+    dependencies=[Depends(agent_key)],
 )
 def internal_finish(round_id: int, request: FailureRequest) -> RoundRecord:
     """Finish a round and roll back any incomplete candidate."""
@@ -203,7 +237,9 @@ def internal_finish(round_id: int, request: FailureRequest) -> RoundRecord:
 
 
 @router.post(
-    "/api/internal/rounds/{round_id}/model-calls", operation_id="record_improver_call"
+    "/api/internal/rounds/{round_id}/model-calls",
+    operation_id="record_improver_call",
+    dependencies=[Depends(agent_key)],
 )
 def internal_call(round_id: int, request: ImproverCallRequest) -> RoundRecord:
     """Record the improver's actual usage and cost for its round."""
@@ -212,7 +248,9 @@ def internal_call(round_id: int, request: ImproverCallRequest) -> RoundRecord:
 
 
 @router.post(
-    "/api/internal/rounds/{round_id}/stop", operation_id="stop_interrupted_round"
+    "/api/internal/rounds/{round_id}/stop",
+    operation_id="stop_interrupted_round",
+    dependencies=[Depends(agent_key)],
 )
 def internal_stop(round_id: int) -> RoundRecord:
     """Stop a round whose accepted decision has already left its checkpoint wait."""

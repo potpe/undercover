@@ -53,7 +53,9 @@ class ClaimState(TypedDict):
 
 def backend() -> httpx.Client:
     """Return a client for the UnderCover backend."""
-    return httpx.Client(base_url=BACKEND_URL, timeout=120)
+    key = os.getenv("UNDERCOVER_API_KEY")
+    headers = {"X-API-Key": key} if key else {}
+    return httpx.Client(base_url=BACKEND_URL, timeout=120, headers=headers)
 
 
 def log_activity(claim_id: str, message: str) -> None:

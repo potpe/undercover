@@ -1,5 +1,6 @@
 import { expect, test } from "@playwright/test";
 import { signIn } from "./auth";
+import { agentHeaders } from "./api";
 
 test("a handler reviews a proposal through the service boundary and sees its applied version", async ({
   page,
@@ -7,7 +8,7 @@ test("a handler reviews a proposal through the service boundary and sees its app
 }) => {
   const created = await request.post(
     "http://127.0.0.1:8000/api/internal/rounds",
-    { data: { handler_id: "HND-01" } },
+    { data: { handler_id: "HND-01" }, headers: agentHeaders },
   );
   expect(created.ok()).toBe(true);
   const round = (await created.json()) as { round_id: number };
@@ -21,10 +22,13 @@ test("a handler reviews a proposal through the service boundary and sees its app
         reason: "Check all coverage",
       },
     },
+    headers: agentHeaders,
   });
+  expect(proposed.ok()).toBe(true);
   const waiting = (await proposed.json()) as {
     proposals: { proposal_id: number }[];
   };
+  expect(waiting.proposals).toHaveLength(1);
   await signIn(page);
   await page.getByRole("button", { name: "Improvement", exact: true }).click();
   await expect(
@@ -57,14 +61,22 @@ test("a handler reviews a proposal through the service boundary and sees its app
           reason: "",
           handler_id: "HND-01",
         },
+        headers: agentHeaders,
       })
     ).ok(),
   ).toBe(true);
-  expect((await request.post(`${prefix}/apply/configuration`)).ok()).toBe(true);
+  expect(
+    (
+      await request.post(`${prefix}/apply/configuration`, {
+        headers: agentHeaders,
+      })
+    ).ok(),
+  ).toBe(true);
   expect(
     (
       await request.post(`${prefix}/finish`, {
         data: { error: "Stub candidate not evaluated" },
+        headers: agentHeaders,
       })
     ).ok(),
   ).toBe(true);

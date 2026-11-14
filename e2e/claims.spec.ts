@@ -1,5 +1,6 @@
 import { expect, test } from "@playwright/test";
 import { signIn } from "./auth";
+import { agentHeaders, handlerHeaders } from "./api";
 
 test.beforeEach(async ({ page }) => {
   await signIn(page);
@@ -82,12 +83,13 @@ test("a decided claim shows its payout, reason, policy and activity", async ({
         policy_section:
           "Section 5: Baggage and Personal Effects; Section 10: How we work out your payment",
       },
+      headers: agentHeaders,
     },
   );
   expect(decision.ok()).toBe(true);
   const payment = await request.post(
     "http://127.0.0.1:8000/api/claims/CLM-1002/payment",
-    { data: { amount: 650 } },
+    { data: { amount: 650 }, headers: agentHeaders },
   );
   expect(payment.ok()).toBe(true);
 
@@ -132,12 +134,13 @@ test("handler sign-off reaches the agent service without direct payment", async 
         policy_section:
           "Section 7: Emergency Medical; Section 10: How we work out your payment",
       },
+      headers: agentHeaders,
     },
   );
   expect(decision.ok()).toBe(true);
   const blocked = await request.post(
     "http://127.0.0.1:8000/api/claims/CLM-1003/payment",
-    { data: { amount: 3750 } },
+    { data: { amount: 3750 }, headers: agentHeaders },
   );
   expect(blocked.status()).toBe(409);
 
@@ -158,7 +161,12 @@ test("handler sign-off reaches the agent service without direct payment", async 
       exact: true,
     }),
   ).toHaveCount(0);
-  const result = await request.get("http://127.0.0.1:8000/api/claims/CLM-1003");
+  const result = await request.get(
+    "http://127.0.0.1:8000/api/claims/CLM-1003",
+    {
+      headers: agentHeaders,
+    },
+  );
   const body = (await result.json()) as {
     paid_amount: number | null;
     signed_off_by: string | null;
@@ -252,11 +260,17 @@ test("the dashboard shows dispatch claims, record summary and sections read", as
   );
   await request.post(
     "http://127.0.0.1:8000/api/claims/CLM-1001/document-section",
-    { data: { document: "claims_manual", section_id: "10" } },
+    {
+      data: { document: "claims_manual", section_id: "10" },
+      headers: agentHeaders,
+    },
   );
   await request.post(
     "http://127.0.0.1:8000/api/claims/CLM-1001/document-section",
-    { data: { document: "policy_wording", section_id: "3" } },
+    {
+      data: { document: "policy_wording", section_id: "3" },
+      headers: agentHeaders,
+    },
   );
 
   await page.goto("/");
@@ -368,12 +382,14 @@ test("the scoreboard shows an API-played evaluation and linked copy", async ({
         evaluation_set: "evaluation",
         tiny: true,
       },
+      headers: agentHeaders,
     },
   );
   expect(created.status()).toBe(201);
   const run = (await created.json()) as { run_id: number };
   const initial = await request.get(
     `http://127.0.0.1:8000/api/evaluations/${String(run.run_id)}`,
+    { headers: await handlerHeaders(request) },
   );
   const evaluation = (await initial.json()) as {
     claim_comparisons: { claim_id: string }[];
@@ -388,12 +404,13 @@ test("the scoreboard shows an API-played evaluation and linked copy", async ({
         reason: "The test plays a held approval for the evaluation copy.",
         policy_section: "Section 7: Emergency Medical; Section 10: Payment",
       },
+      headers: agentHeaders,
     },
   );
   expect(decision.ok()).toBe(true);
   await request.post(
     `http://127.0.0.1:8000/api/internal/runs/${String(run.run_id)}/claims/${copyId}/complete`,
-    { data: { result: "Held evaluation approval" } },
+    { data: { result: "Held evaluation approval" }, headers: agentHeaders },
   );
   await request.post(`http://127.0.0.1:8000/api/claims/${copyId}/model-calls`, {
     data: {
@@ -405,6 +422,7 @@ test("the scoreboard shows an API-played evaluation and linked copy", async ({
       total_tokens: 15,
       cost: 0.1,
     },
+    headers: agentHeaders,
   });
   await request.post(
     `http://127.0.0.1:8000/api/claims/${copyId}/work-periods`,
@@ -416,10 +434,12 @@ test("the scoreboard shows an API-played evaluation and linked copy", async ({
         finished_at: "2026-11-10T12:00:02Z",
         seconds: 2,
       },
+      headers: agentHeaders,
     },
   );
   await request.post(
     `http://127.0.0.1:8000/api/internal/runs/${String(run.run_id)}/finish`,
+    { headers: agentHeaders },
   );
 
   await page.goto("/");

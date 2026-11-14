@@ -46,9 +46,36 @@ class StubModel:
 def test_evaluation_uses_claim_graph_without_changing_queue_or_retaining_progress(
     client, monkeypatch, payout
 ):
-    monkeypatch.setattr(main, "backend", lambda: TestClient(backend_main.app))
-    monkeypatch.setattr(service, "backend", lambda: TestClient(backend_main.app))
-    monkeypatch.setattr(dispatcher, "backend", lambda: TestClient(backend_main.app))
+    monkeypatch.setattr(
+        main,
+        "backend",
+        lambda: TestClient(
+            backend_main.app,
+            headers={
+                "X-API-Key": "undercover-e2e-agent-key-32-characters",
+            },
+        ),
+    )
+    monkeypatch.setattr(
+        service,
+        "backend",
+        lambda: TestClient(
+            backend_main.app,
+            headers={
+                "X-API-Key": "undercover-e2e-agent-key-32-characters",
+            },
+        ),
+    )
+    monkeypatch.setattr(
+        dispatcher,
+        "backend",
+        lambda: TestClient(
+            backend_main.app,
+            headers={
+                "X-API-Key": "undercover-e2e-agent-key-32-characters",
+            },
+        ),
+    )
     monkeypatch.setattr(main, "model", lambda _configuration: StubModel(payout))
     before = client.get("/api/claims").json()
     created = client.post(
@@ -89,9 +116,36 @@ def test_evaluation_uses_claim_graph_without_changing_queue_or_retaining_progres
 
 
 def test_terminal_evaluation_error_also_clears_saved_progress(client, monkeypatch):
-    monkeypatch.setattr(main, "backend", lambda: TestClient(backend_main.app))
-    monkeypatch.setattr(service, "backend", lambda: TestClient(backend_main.app))
-    monkeypatch.setattr(dispatcher, "backend", lambda: TestClient(backend_main.app))
+    monkeypatch.setattr(
+        main,
+        "backend",
+        lambda: TestClient(
+            backend_main.app,
+            headers={
+                "X-API-Key": "undercover-e2e-agent-key-32-characters",
+            },
+        ),
+    )
+    monkeypatch.setattr(
+        service,
+        "backend",
+        lambda: TestClient(
+            backend_main.app,
+            headers={
+                "X-API-Key": "undercover-e2e-agent-key-32-characters",
+            },
+        ),
+    )
+    monkeypatch.setattr(
+        dispatcher,
+        "backend",
+        lambda: TestClient(
+            backend_main.app,
+            headers={
+                "X-API-Key": "undercover-e2e-agent-key-32-characters",
+            },
+        ),
+    )
     created = client.post(
         "/api/internal/evaluations",
         json={

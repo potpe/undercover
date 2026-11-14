@@ -9,7 +9,7 @@ import httpx
 from fastapi import BackgroundTasks, Depends, FastAPI, HTTPException
 
 from backend import agent_service
-from backend.auth import current_handler
+from backend.auth import agent_key, agent_or_handler, current_handler
 from backend.configurations import (
     agent_configuration,
     current_recipe,
@@ -139,14 +139,20 @@ def configuration_version(
 
 
 @app.get(
-    "/api/agent/configuration/current", operation_id="get_current_agent_configuration"
+    "/api/agent/configuration/current",
+    operation_id="get_current_agent_configuration",
+    dependencies=[Depends(agent_key)],
 )
 def current_agent_configuration() -> dict[str, Any]:
     """Return the current score-free claim agent configuration."""
     return agent_configuration()
 
 
-@app.get("/api/agent/configuration/{version}", operation_id="get_agent_configuration")
+@app.get(
+    "/api/agent/configuration/{version}",
+    operation_id="get_agent_configuration",
+    dependencies=[Depends(agent_key)],
+)
 def selected_agent_configuration(version: int) -> dict[str, Any]:
     """Return one score-free claim agent configuration version."""
     return agent_configuration(version)
@@ -160,7 +166,11 @@ def recipe_history(
     return RecipeHistory(**list_recipes())
 
 
-@app.get("/api/internal/recipes/current", operation_id="get_current_recipe")
+@app.get(
+    "/api/internal/recipes/current",
+    operation_id="get_current_recipe",
+    dependencies=[Depends(agent_key)],
+)
 def internal_current_recipe() -> dict[str, Any]:
     """Return the current recipe for the improver service."""
     return current_recipe()
@@ -208,13 +218,32 @@ def improvement_rounds(
     return [RoundRecord(**round) for round in list_rounds()]
 
 
-@app.get("/api/claims", operation_id="list_claims")
+@app.get(
+    "/api/claims",
+    operation_id="list_claims",
+    dependencies=[Depends(agent_or_handler)],
+)
 def claims() -> list[ClaimSummary]:
     """List the operational claims queue."""
     return [ClaimSummary(**claim) for claim in list_claims()]
 
 
-@app.get("/api/claims/{claim_id}", operation_id="get_claim")
+@app.post(
+    "/api/internal/claims/{claim_id}/work",
+    operation_id="start_internal_named_work",
+    dependencies=[Depends(agent_key)],
+)
+def internal_start_named_work(claim_id: str, request: RunRequest) -> RunResponse:
+    """Start one named claim for the agent command line."""
+    start_run(claim_id, request.thread_id)
+    return RunResponse(claim_id=claim_id, status="in_progress")
+
+
+@app.get(
+    "/api/claims/{claim_id}",
+    operation_id="get_claim",
+    dependencies=[Depends(agent_or_handler)],
+)
 def claim(claim_id: str) -> ClaimBundle:
     """Return a claim and its related records."""
     bundle = get_claim_bundle(claim_id)
@@ -223,13 +252,21 @@ def claim(claim_id: str) -> ClaimBundle:
     return ClaimBundle(**bundle)
 
 
-@app.post("/api/claims/{claim_id}/payout", operation_id="calculate_payout")
+@app.post(
+    "/api/claims/{claim_id}/payout",
+    operation_id="calculate_payout",
+    dependencies=[Depends(agent_key)],
+)
 def payout(claim_id: str, request: PayoutRequest) -> PayoutResponse:
     """Calculate an approved claim's payout using UnderCover's rules."""
     return calculate_claim_payout(claim_id, request)
 
 
-@app.post("/api/claims/{claim_id}/decision", operation_id="record_decision")
+@app.post(
+    "/api/claims/{claim_id}/decision",
+    operation_id="record_decision",
+    dependencies=[Depends(agent_key)],
+)
 def decision(claim_id: str, request: DecisionRequest) -> ClaimBundle:
     """Record the agent's decision for a claim."""
     record_decision(claim_id, request)
@@ -256,14 +293,22 @@ def sign_off_claim(
     return claim(claim_id)
 
 
-@app.post("/api/claims/{claim_id}/failure", operation_id="fail_claim_recovery")
+@app.post(
+    "/api/claims/{claim_id}/failure",
+    operation_id="fail_claim_recovery",
+    dependencies=[Depends(agent_key)],
+)
 def fail_claim_recovery(claim_id: str, request: FailureRequest) -> ClaimBundle:
     """Return a failed recovered claim to the existing retry workflow."""
     fail_claim(claim_id, request.error)
     return claim(claim_id)
 
 
-@app.post("/api/claims/{claim_id}/payment", operation_id="record_payment")
+@app.post(
+    "/api/claims/{claim_id}/payment",
+    operation_id="record_payment",
+    dependencies=[Depends(agent_key)],
+)
 def payment(claim_id: str, request: PaymentRequest) -> ClaimBundle:
     """Record a claim payment after checking the approval rules."""
     record_payment(claim_id, request)
@@ -298,7 +343,11 @@ def start_dispatch(
     return RunRecord(**response.json())
 
 
-@app.get("/api/dispatches/current", operation_id="get_current_dispatch")
+@app.get(
+    "/api/dispatches/current",
+    operation_id="get_current_dispatch",
+    dependencies=[Depends(current_handler)],
+)
 def get_current_dispatch() -> RunRecord | None:
     """Return the latest dispatch and its record-built progress."""
     run = current_dispatch()
@@ -320,45 +369,73 @@ def start_evaluation(
     return RunRecord(**response.json())
 
 
-@app.get("/api/evaluations", operation_id="list_evaluations")
+@app.get(
+    "/api/evaluations",
+    operation_id="list_evaluations",
+    dependencies=[Depends(current_handler)],
+)
 def get_evaluations() -> list[EvaluationRecord]:
     """List evaluations newest first with their scoreboard measures."""
     return [EvaluationRecord(**run) for run in list_evaluations()]
 
 
-@app.get("/api/evaluations/{run_id}", operation_id="get_evaluation")
+@app.get(
+    "/api/evaluations/{run_id}",
+    operation_id="get_evaluation",
+    dependencies=[Depends(current_handler)],
+)
 def get_evaluation(run_id: int) -> EvaluationRecord:
     """Return one evaluation's measures and claim comparisons."""
     return EvaluationRecord(**evaluation_record(run_id))
 
 
 @app.post(
-    "/api/internal/evaluations", operation_id="create_evaluation", status_code=201
+    "/api/internal/evaluations",
+    operation_id="create_evaluation",
+    status_code=201,
+    dependencies=[Depends(agent_key)],
 )
 def internal_create_evaluation(request: CreateEvaluationRequest) -> RunRecord:
     """Create an evaluation and its isolated claim copies for the service."""
     return RunRecord(**create_evaluation(request))
 
 
-@app.post("/api/internal/dispatches", operation_id="create_dispatch", status_code=201)
+@app.post(
+    "/api/internal/dispatches",
+    operation_id="create_dispatch",
+    status_code=201,
+    dependencies=[Depends(agent_key)],
+)
 def internal_create_dispatch(request: CreateRunRequest) -> RunRecord:
     """Create the agent service's dispatch and select its claims."""
     return RunRecord(**create_dispatch(request))
 
 
-@app.post("/api/internal/runs/stop-active", operation_id="stop_active_runs")
+@app.post(
+    "/api/internal/runs/stop-active",
+    operation_id="stop_active_runs",
+    dependencies=[Depends(agent_key)],
+)
 def internal_stop_active_runs() -> StoppedRuns:
     """Mark runs left in progress by a stopped agent service as stopped."""
     return StoppedRuns(stopped=stop_active_runs())
 
 
-@app.get("/api/internal/runs/{run_id}", operation_id="get_run")
+@app.get(
+    "/api/internal/runs/{run_id}",
+    operation_id="get_run",
+    dependencies=[Depends(agent_key)],
+)
 def internal_get_run(run_id: int) -> RunRecord:
     """Return one run for the agent service."""
     return RunRecord(**get_run_or_404(run_id))
 
 
-@app.post("/api/internal/runs/{run_id}/budget", operation_id="check_claim_run_budget")
+@app.post(
+    "/api/internal/runs/{run_id}/budget",
+    operation_id="check_claim_run_budget",
+    dependencies=[Depends(agent_key)],
+)
 def internal_check_claim_budget(run_id: int) -> dict[str, str]:
     """Refuse a new claim model call after its round stops or exhausts budget."""
     check_run(run_id, spending=True)
@@ -375,6 +452,7 @@ def get_run_or_404(run_id: int) -> dict[str, Any]:
 @app.post(
     "/api/internal/runs/{run_id}/claims/{claim_id}/begin",
     operation_id="begin_run_claim",
+    dependencies=[Depends(agent_key)],
 )
 def internal_begin_work(run_id: int, claim_id: str) -> WorkContext:
     """Begin or resume one selected claim on its own durable thread."""
@@ -384,6 +462,7 @@ def internal_begin_work(run_id: int, claim_id: str) -> WorkContext:
 @app.post(
     "/api/internal/runs/{run_id}/claims/{claim_id}/complete",
     operation_id="complete_run_claim",
+    dependencies=[Depends(agent_key)],
 )
 def internal_complete_work(
     run_id: int, claim_id: str, request: CompleteWorkRequest
@@ -395,6 +474,7 @@ def internal_complete_work(
 @app.post(
     "/api/internal/runs/{run_id}/claims/{claim_id}/fail",
     operation_id="fail_run_claim",
+    dependencies=[Depends(agent_key)],
 )
 def internal_fail_work(
     run_id: int, claim_id: str, request: FailureRequest
@@ -406,6 +486,7 @@ def internal_fail_work(
 @app.post(
     "/api/internal/runs/{run_id}/claims/{claim_id}/leave",
     operation_id="leave_run_claim",
+    dependencies=[Depends(agent_key)],
 )
 def internal_leave_work(
     run_id: int, claim_id: str, request: FailureRequest
@@ -414,14 +495,22 @@ def internal_leave_work(
     return WorkOutcome(**leave_work(run_id, claim_id, request.error))
 
 
-@app.post("/api/internal/runs/{run_id}/stop", operation_id="stop_run")
+@app.post(
+    "/api/internal/runs/{run_id}/stop",
+    operation_id="stop_run",
+    dependencies=[Depends(agent_key)],
+)
 def internal_stop_run(run_id: int, request: FailureRequest) -> RunRecord:
     """Stop a run after an agent-service orchestration error."""
     stop_run(run_id, request.error)
     return RunRecord(**get_run_or_404(run_id))
 
 
-@app.post("/api/internal/runs/{run_id}/finish", operation_id="finish_run")
+@app.post(
+    "/api/internal/runs/{run_id}/finish",
+    operation_id="finish_run",
+    dependencies=[Depends(agent_key)],
+)
 def internal_finish_run(run_id: int) -> RunRecord:
     """Finish a run with a summary and totals built from its records."""
     record = finish_run(run_id)
@@ -430,7 +519,11 @@ def internal_finish_run(run_id: int) -> RunRecord:
     return RunRecord(**record)
 
 
-@app.post("/api/claims/{claim_id}/model-calls", operation_id="record_model_call")
+@app.post(
+    "/api/claims/{claim_id}/model-calls",
+    operation_id="record_model_call",
+    dependencies=[Depends(agent_key)],
+)
 def model_call(claim_id: str, request: ModelCallRequest) -> ClaimBundle:
     """Record the exact OpenRouter usage reported for one model call."""
     check_run(request.run_id)
@@ -439,7 +532,11 @@ def model_call(claim_id: str, request: ModelCallRequest) -> ClaimBundle:
     return claim(claim_id)
 
 
-@app.post("/api/claims/{claim_id}/work-periods", operation_id="record_work_period")
+@app.post(
+    "/api/claims/{claim_id}/work-periods",
+    operation_id="record_work_period",
+    dependencies=[Depends(agent_key)],
+)
 def work_period(claim_id: str, request: WorkPeriodRequest) -> ClaimBundle:
     """Record one period of active agent work on a claim."""
     check_run(request.run_id)
@@ -448,7 +545,11 @@ def work_period(claim_id: str, request: WorkPeriodRequest) -> ClaimBundle:
     return claim(claim_id)
 
 
-@app.post("/api/claims/{claim_id}/activity", operation_id="record_activity")
+@app.post(
+    "/api/claims/{claim_id}/activity",
+    operation_id="record_activity",
+    dependencies=[Depends(agent_key)],
+)
 def activity(claim_id: str, request: ActivityRequest) -> ClaimBundle:
     """Record an agent activity entry for a claim."""
     if get_claim_bundle(claim_id) is None:
@@ -458,7 +559,9 @@ def activity(claim_id: str, request: ActivityRequest) -> ClaimBundle:
 
 
 @app.post(
-    "/api/claims/{claim_id}/document-search", operation_id="search_claim_documents"
+    "/api/claims/{claim_id}/document-search",
+    operation_id="search_claim_documents",
+    dependencies=[Depends(agent_key)],
 )
 def document_search(
     claim_id: str, request: DocumentSearchRequest
@@ -472,7 +575,11 @@ def document_search(
     ]
 
 
-@app.post("/api/claims/{claim_id}/document-section", operation_id="read_claim_document")
+@app.post(
+    "/api/claims/{claim_id}/document-section",
+    operation_id="read_claim_document",
+    dependencies=[Depends(agent_key)],
+)
 def document_section(
     claim_id: str, request: DocumentSectionRequest
 ) -> DocumentSectionContent:
@@ -485,13 +592,21 @@ def document_section(
     return DocumentSectionContent(**section)
 
 
-@app.get("/api/agent/instructions", operation_id="get_agent_instructions")
+@app.get(
+    "/api/agent/instructions",
+    operation_id="get_agent_instructions",
+    dependencies=[Depends(current_handler)],
+)
 def agent_instructions() -> Instructions:
     """Return the current claim agent's read-only instructions."""
     return Instructions(claim=agent_configuration()["instructions"])
 
 
-@app.get("/api/handlers", operation_id="list_handlers")
+@app.get(
+    "/api/handlers",
+    operation_id="list_handlers",
+    dependencies=[Depends(current_handler)],
+)
 def handlers() -> list[dict[str, Any]]:
     """List the claims handlers."""
     return list_handlers()

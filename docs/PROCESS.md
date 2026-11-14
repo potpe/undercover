@@ -12,6 +12,10 @@ Stop the services before `npm run seed`, which intentionally resets the database
 
 The pre-commit hook runs the format, lint, type and unit test checks on every commit.
 
+Set `UNDERCOVER_API_KEY` to a random value of at least 32 characters in `.env` for live agent work. Every agent-side backend request sends it in `X-API-Key`, including clients created after dotenv loads. The backend starts without it, but agent-only requests return 401 and the agent service refuses to start. Shared claim reads also accept a handler's bearer token; dashboard actions always require handler sign-in. The named-claim CLI uses a separate internal start operation and invokes the claim graph without impersonating a handler.
+
+Automated fixtures use a fixed, non-secret agent key and separate local handler tokens. Tests never read root `.env` or contact hosted Auth, models or AWS. Before the full offline gate, move root `.env` aside and restore it in a `finally` block.
+
 ## Planning
 
 When asked to plan, as in "Please plan the pilot", write the plan to `docs/PLAN.md` and write no code.

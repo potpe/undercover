@@ -170,5 +170,8 @@ it("clears the previous handler and form when the signed-in identity changes", a
     );
   });
   expect(await screen.findByText("Marcus Oyelaran")).toBeDefined();
-  expect(screen.getByLabelText("Agents at once")).toHaveProperty("value", "3");
+  expect(await screen.findByLabelText("Agents at once")).toHaveProperty(
+    "value",
+    "3",
+  );
 });

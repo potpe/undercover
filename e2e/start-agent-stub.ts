@@ -3,6 +3,7 @@ import {
   type IncomingMessage,
   type ServerResponse,
 } from "node:http";
+import { agentHeaders } from "./api.ts";
 
 const requests: { method: string; url: string; body: unknown }[] = [];
 
@@ -46,7 +47,7 @@ async function roundResponse(
   if (url === "/rounds") {
     const created = await fetch("http://127.0.0.1:8000/api/internal/rounds", {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: { "Content-Type": "application/json", ...agentHeaders },
       body: JSON.stringify(body),
     });
     response.statusCode = created.ok ? 202 : created.status;
@@ -56,6 +57,7 @@ async function roundResponse(
   const roundId = url.split("/")[2];
   const current = await fetch(
     `http://127.0.0.1:8000/api/internal/rounds/${roundId}`,
+    { headers: agentHeaders },
   );
   response.end(await current.text());
 }

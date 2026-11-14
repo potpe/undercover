@@ -2,13 +2,11 @@
 
 from typing import Any
 
-import httpx
-
-BACKEND_URL = "http://localhost:8000"
+from agent.main import backend
 
 
 def request(method: str, path: str, body: dict | None = None) -> dict[str, Any]:
-    with httpx.Client(base_url=BACKEND_URL, timeout=30) as client:
+    with backend() as client:
         response = client.request(method, path, json=body)
     response.raise_for_status()
     return response.json()

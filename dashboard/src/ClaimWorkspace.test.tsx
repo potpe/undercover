@@ -162,7 +162,7 @@ function requestUrl(input: RequestInfo | URL): string {
 function mockDetail(initial: ClaimBundle) {
   const fetchMock = vi.fn((input: RequestInfo | URL, init?: RequestInit) => {
     const url = requestUrl(input);
-    if (url === "/api/claims/CLM-1001" && !init) {
+    if (url === "/api/claims/CLM-1001" && init?.method === undefined) {
       return Promise.resolve(response(initial));
     }
     if (url === "/api/handlers") {
@@ -237,7 +237,7 @@ it("starts one run and polls until the decision is visible", async () => {
   let reads = 0;
   const fetchMock = vi.fn((input: RequestInfo | URL, init?: RequestInit) => {
     const url = requestUrl(input);
-    if (url === "/api/claims/CLM-1001" && !init) {
+    if (url === "/api/claims/CLM-1001" && init?.method === undefined) {
       reads += 1;
       let current = decided;
       if (reads === 1) current = waiting;
@@ -310,7 +310,7 @@ it("signs off and polls until the agent records an over-limit payment", async ()
   fetchMock.mockImplementation(
     (input: RequestInfo | URL, init?: RequestInit) => {
       const url = requestUrl(input);
-      if (url === "/api/claims/CLM-1001" && !init) {
+      if (url === "/api/claims/CLM-1001" && init?.method === undefined) {
         reads += 1;
         let current: ClaimBundle = paid;
         if (reads === 1) current = waiting;
@@ -363,7 +363,7 @@ it("shows a rejected sign-off and keeps the decision visible", async () => {
   fetchMock.mockImplementation(
     (input: RequestInfo | URL, init?: RequestInit) => {
       const url = requestUrl(input);
-      if (url === "/api/claims/CLM-1001" && !init)
+      if (url === "/api/claims/CLM-1001" && init?.method === undefined)
         return Promise.resolve(response(waiting));
       if (url === "/api/handlers")
         return Promise.resolve(

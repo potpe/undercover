@@ -1,6 +1,7 @@
 """Verify Supabase handler sessions and enforce handler permissions."""
 
 import os
+import secrets
 from functools import lru_cache
 from typing import Any
 
@@ -11,6 +12,33 @@ from jwt.exceptions import PyJWKClientError
 from backend.database import list_handlers
 
 SUPABASE_URL = os.getenv("VITE_SUPABASE_URL", "").rstrip("/")
+
+
+def agent_key(request: Request) -> None:
+    """Require the configured agent API key without exposing it as an API input."""
+    expected = os.getenv("UNDERCOVER_API_KEY")
+    supplied = request.headers.get("X-API-Key", "")
+    if (
+        not expected
+        or not supplied
+        or not secrets.compare_digest(
+            supplied.encode("utf-8"), expected.encode("utf-8")
+        )
+    ):
+        raise HTTPException(status_code=401, detail="Invalid or missing API key")
+
+
+def agent_or_handler(request: Request) -> dict[str, Any] | None:
+    """Accept either the agent key or a signed-in handler."""
+    expected = os.getenv("UNDERCOVER_API_KEY")
+    supplied = request.headers.get("X-API-Key", "")
+    if (
+        expected
+        and supplied
+        and secrets.compare_digest(supplied.encode("utf-8"), expected.encode("utf-8"))
+    ):
+        return None
+    return current_handler(request)
 
 
 @lru_cache

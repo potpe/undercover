@@ -1,5 +1,9 @@
 # Status
 
+Security Phase 1 adds request-time agent API-key authentication, explicit route credential boundaries, handler bearer tokens on every dashboard request, and a key-only named-claim CLI start followed by direct graph execution. `UNDERCOVER_API_KEY` must contain a random value of at least 32 characters. The backend starts without it but refuses agent-only requests; the agent service fails before recovery when it is missing. The key never grants handler permissions.
+
+Security Phase 1's complete `npm run check` passes with root `.env` absent and safely restored: 216 Python tests at 93.70% coverage, 51 dashboard tests at 88.28% statement coverage, and all 14 Playwright tests. Agent-side test clients carry only the fixed non-secret service key, while local handler sessions remain separate. Removing bearer injection makes all three new API regression tests fail. A separate security review found no required corrections after replacing path middleware with explicit route dependencies. No live reseed or model call has run.
+
 The swarm, scoreboard and Improvement Phases 1–4 are implemented and pass the offline gate. This includes Supabase password sign-in, handler permissions, versioned configuration/recipes, judging, durable improvement rounds, budget controls and the Improvement page. Hosted connection limitations remain documented below. No live improvement round was run.
 
 - `backend/`: FastAPI and SQLAlchemy Core on SQLite offline or Supabase Postgres. APIs cover claims, judging, versioned configurations/recipes, settings/audits, improvement rounds/proposals, spending and verdicts as well as dispatches, evaluations and claim operations. The backend enforces handler permissions, the approval limit, and idempotent writes. Handler sources and answer keys stay backend-only.

@@ -62,7 +62,12 @@ def recipe_proposal(recipe, call_id="recipe"):
 
 def local_api(monkeypatch):
     def request(method, path, body=None):
-        result = TestClient(app).request(method, path, json=body)
+        result = TestClient(
+            app,
+            headers={
+                "X-API-Key": "undercover-e2e-agent-key-32-characters",
+            },
+        ).request(method, path, json=body)
         response = httpx.Response(
             result.status_code,
             json=result.json(),
@@ -72,8 +77,26 @@ def local_api(monkeypatch):
         return response.json()
 
     monkeypatch.setattr(improver_api, "request", request)
-    monkeypatch.setattr(service, "backend", lambda: TestClient(app))
-    monkeypatch.setattr(main, "backend", lambda: TestClient(app))
+    monkeypatch.setattr(
+        service,
+        "backend",
+        lambda: TestClient(
+            app,
+            headers={
+                "X-API-Key": "undercover-e2e-agent-key-32-characters",
+            },
+        ),
+    )
+    monkeypatch.setattr(
+        main,
+        "backend",
+        lambda: TestClient(
+            app,
+            headers={
+                "X-API-Key": "undercover-e2e-agent-key-32-characters",
+            },
+        ),
+    )
     monkeypatch.setattr(
         service, "post_backend", lambda path, body=None: request("POST", path, body)
     )

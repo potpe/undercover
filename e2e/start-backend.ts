@@ -1,6 +1,7 @@
 import { spawn } from "node:child_process";
 import { rmSync } from "node:fs";
 import { resolve } from "node:path";
+import { AGENT_API_KEY } from "./api.ts";
 
 const databasePath = resolve("e2e/undercover-e2e.db");
 for (const suffix of ["", "-shm", "-wal"]) {
@@ -20,6 +21,7 @@ const child = spawn(
       LANGFUSE_PUBLIC_KEY: "",
       LANGFUSE_BASE_URL: "",
       UNDERCOVER_AGENT: "http://127.0.0.1:8003",
+      UNDERCOVER_API_KEY: AGENT_API_KEY,
       VITE_SUPABASE_URL: "http://127.0.0.1:8005",
       VITE_SUPABASE_PUBLISHABLE_KEY: "e2e-publishable-key",
       MODEL_NAME: "",

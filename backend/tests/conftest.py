@@ -5,6 +5,8 @@ from fastapi.testclient import TestClient
 from backend import agent_service, auth, judge
 from backend.main import app
 
+TEST_AGENT_KEY = "undercover-e2e-agent-key-32-characters"
+
 
 @pytest.fixture
 def client(tmp_path, monkeypatch):
@@ -49,5 +51,12 @@ def client(tmp_path, monkeypatch):
         },
     )
     monkeypatch.setenv("VITE_SUPABASE_URL", "http://supabase.test")
-    with TestClient(app, headers={"Authorization": "Bearer dana-token"}) as test_client:
+    monkeypatch.setenv("UNDERCOVER_API_KEY", TEST_AGENT_KEY)
+    with TestClient(
+        app,
+        headers={
+            "Authorization": "Bearer dana-token",
+            "X-API-Key": TEST_AGENT_KEY,
+        },
+    ) as test_client:
         yield test_client
