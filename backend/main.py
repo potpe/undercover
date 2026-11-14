@@ -4,10 +4,13 @@ from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from copy import deepcopy
 from http import HTTPStatus
+from pathlib import Path, PurePosixPath
 from typing import Annotated, Any
 
 import httpx
 from fastapi import BackgroundTasks, Depends, FastAPI, HTTPException
+from fastapi.responses import FileResponse, JSONResponse, Response
+from mangum import Mangum
 
 from backend import agent_service
 from backend.auth import agent_key, agent_or_handler, current_handler
@@ -105,6 +108,36 @@ async def lifespan(_: FastAPI) -> AsyncIterator[None]:
 
 app = FastAPI(title="UnderCover", lifespan=lifespan)
 app.include_router(improvement_router)
+DASHBOARD_DIST = Path(__file__).resolve().parent.parent / "dashboard" / "dist"
+
+
+def register_dashboard_fallback(target_app: FastAPI, dashboard_dir: Path) -> bool:
+    """Register safe static and SPA routes when a built dashboard is available."""
+    if not dashboard_dir.is_dir() or not (dashboard_dir / "index.html").is_file():
+        return False
+    root = dashboard_dir.resolve()
+    index = root / "index.html"
+
+    @target_app.get("/{path:path}", include_in_schema=False, name="dashboard_fallback")
+    def dashboard_fallback(path: str) -> Response:
+        parts = PurePosixPath(path).parts
+        if path == "api" or path.startswith("api/") or "\\" in path or ".." in parts:
+            return JSONResponse(status_code=404, content={"detail": "Not Found"})
+        try:
+            target = (root / path).resolve(strict=True) if path else index
+        except FileNotFoundError:
+            target = index
+        except (OSError, RuntimeError):
+            return JSONResponse(status_code=404, content={"detail": "Not Found"})
+        try:
+            target.relative_to(root)
+        except ValueError:
+            return JSONResponse(status_code=404, content={"detail": "Not Found"})
+        if target.is_file():
+            return FileResponse(target)
+        return FileResponse(index)
+
+    return True
 
 
 def service_error(error: httpx.HTTPError) -> HTTPException:
@@ -672,3 +705,7 @@ def agent_instructions() -> Instructions:
 def handlers() -> list[dict[str, Any]]:
     """List the claims handlers."""
     return list_handlers()
+
+
+register_dashboard_fallback(app, DASHBOARD_DIST)
+handler = Mangum(app, lifespan="off")

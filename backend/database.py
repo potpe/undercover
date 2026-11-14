@@ -28,6 +28,7 @@ from sqlalchemy import (
     inspect,
     select,
 )
+from sqlalchemy.pool import NullPool
 from sqlalchemy.schema import CreateSchema, DropSchema
 
 from backend.documents import parse_sections, rank_sections
@@ -309,6 +310,15 @@ def create_db_engine(url: str) -> Engine:
     elif url.startswith("postgresql://"):
         url = url.replace("postgresql://", "postgresql+psycopg://", 1)
     if url.startswith("postgresql"):
+        if os.getenv("AWS_LAMBDA_FUNCTION_NAME"):
+            return create_engine(
+                url,
+                connect_args={
+                    "options": f"-c search_path={SCHEMA}",
+                    "prepare_threshold": None,
+                },
+                poolclass=NullPool,
+            )
         return create_engine(
             url,
             connect_args={"options": f"-c search_path={SCHEMA}"},

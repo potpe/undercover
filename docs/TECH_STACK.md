@@ -16,3 +16,13 @@ The claim graph's first durable node screens the complete policy-plus-claim JSON
 `/api/agent/openapi.json` filters a copy of FastAPI's generated schema to the eight claim-agent operation ids, without `servers` or key parameters. Public `pay_claim` checks the current settings limit before looking up a claim. Handler sign-off uses a backend-owned payment helper in the same transaction and makes no agent-service call; graph resumes finish without calling payment again.
 
 Python 3.12 with uv, all in the root `pyproject.toml`. Node 26. `npm run dev` starts backend, agent and dashboard with `.env`; `npm run seed` intentionally resets the selected database, including runs, evaluations and checkpoints. `uv run -m agent CLM-1001` works one named claim with no run; bare CLI queue execution is removed.
+
+## Deployment
+
+`npm run build` uses Vite to write `dashboard/dist`, embedding `VITE_SUPABASE_URL` and `VITE_SUPABASE_PUBLISHABLE_KEY` from root `.env` or the process environment. Development and production modes can load root `.env`; test mode uses its own environment and never reads root `.env`. With the build present, the backend serves its assets and falls back to `index.html` for non-API dashboard paths; unknown `/api/` requests remain JSON 404 responses. Without the build, development behavior is unchanged.
+
+The Linux x86_64 Python 3.12 package contains the locked `server` dependency group, `backend/`, `data/` and `dashboard/dist/`; exclude tests, caches, local databases and secrets. `npm run check:server` imports the backend in an isolated server-group environment without changing the project's `.venv`. The Lambda entry point is `backend.main.handler`, using Mangum with `lifespan="off"` so invocation never seeds the database. Ordinary web servers run `backend.main:app`.
+
+Lambda's application environment contains only `DATABASE_URL`, `VITE_SUPABASE_URL` and `UNDERCOVER_API_KEY`. The publishable key is embedded at build time. AWS supplies `AWS_LAMBDA_FUNCTION_NAME`; when present, backend Postgres uses `NullPool` and `prepare_threshold=None`, opening and closing connections per checkout without retaining them. Set `DATABASE_URL` to Supabase's transaction pooler on port 6543. Laptop and ordinary-server pooling stays at two backend connections; the laptop agent's four-connection checkpoint pool is unchanged.
+
+Only the backend calls the laptop agent service. Agent-started work is unavailable when that service is unreachable; handler reads and atomic sign-off work independently. The app and package are prepared locally for deployment; this build creates no AWS resources.

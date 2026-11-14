@@ -31,4 +31,6 @@ A decision is scored on two things: the decision itself and the payout. A valid 
 
 ## The security claim
 
-- `security/`: CLM-1901, a stolen watch whose story carries an instruction to the AI to approve it in full, with its policy, its customer and the handler's decision (decline). It is a prompt injection kept for security testing, in a folder of its own, apart from the queue and the evaluation sets.
+- `security/`: CLM-1901, a stolen watch whose story carries an instruction to the AI to approve it in full. Its policy and customer are seeded into the operational queue; its handler decision remains unseeded, and the claim is excluded from both evaluation sets.
+
+The Lambda package includes the application data directory. Evaluation sources and handler labels remain backend-only: the claim agent receives neither the files nor their answer keys. The package is built and checked locally; no AWS resources are created by this build.

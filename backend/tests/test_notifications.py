@@ -3,7 +3,7 @@ import httpx
 from backend import agent_service
 
 
-def test_signoff_stands_when_agent_service_is_unavailable(client, monkeypatch):
+def test_signoff_pays_atomically_without_contacting_agent_service(client, monkeypatch):
     decided = client.post(
         "/api/claims/CLM-1003/decision",
         json={
@@ -25,7 +25,8 @@ def test_signoff_stands_when_agent_service_is_unavailable(client, monkeypatch):
 
     assert response.status_code == 200
     bundle = response.json()
-    assert bundle["claim"]["status"] == "in_progress"
+    assert bundle["claim"]["status"] == "decided"
     assert bundle["signed_off_by"] == "HND-01"
     assert bundle["signed_off_at"] is not None
-    assert bundle["paid_amount"] is None
+    assert bundle["paid_amount"] == 3750
+    assert bundle["paid_at"] is not None

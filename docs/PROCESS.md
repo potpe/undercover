@@ -9,6 +9,7 @@ Stop the services before `npm run seed`, which intentionally resets the database
 - Python: ruff (lint and format), pyright, and pytest with 80% coverage
 - TypeScript: ESLint, Prettier, tsc, and vitest with 80% coverage
 - Playwright end-to-end tests
+- An isolated import with only the `server` dependency group; the project environment is left intact
 
 The pre-commit hook runs the format, lint, type and unit test checks on every commit.
 
@@ -19,6 +20,8 @@ Automated fixtures use a fixed, non-secret agent key and separate local handler 
 The first claim activity is the hidden-instruction check's result. Flagged claims become zero-payout referrals with the checker reason and `Security check` section. Each raw screening response contributes reported usage, including up to three structured-answer attempts. Saved claim progress does not repeat completed screening. Automated tests stub the checker independently of the claim model.
 
 Signing off an eligible held payout records its payment immediately and atomically in the backend. The agent service need not be running, and any later resume finishes without another payment call. The agent's public payment route refuses every amount above the current approval limit, even after sign-off. The key-or-handler-protected `/api/agent/openapi.json` is the generated eight-operation contract for the later Gateway; this build does not deploy it.
+
+`npm run build` writes `dashboard/dist` using the Supabase build variables from root `.env` or the process environment; it also works with `.env` absent. Tests use explicit stand-in values and never read root `.env`. Then `uv run -m uvicorn backend.main:app --env-file .env` serves the dashboard and API together on port 8000. Deep links outside `/api/` return the SPA; unknown API routes stay JSON 404. `npm run dev` is unchanged. `backend.main.handler` is the Lambda entry point and disables lifespan startup, so Lambda invocation does not seed the database. For a local Lambda-mode check, supply `AWS_LAMBDA_FUNCTION_NAME` and the transaction-pooler URL on port 6543 without permanently changing `.env`; Lambda uses request-scoped unprepared connections. Never deploy or create AWS resources as part of these checks.
 
 ## Planning
 

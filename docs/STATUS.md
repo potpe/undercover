@@ -1,6 +1,20 @@
 # Status
 
-Security Phase 3 adds the generated eight-operation agent OpenAPI, shared policy/history reads, current-limit-first public payment guard, and atomic sign-off/payment without an agent-service notification. Failure injection proves sign-off and payment roll back together; repeated graph resume makes no payment call. The complete no-`.env` gate passes 234 Python tests at 93.79% coverage, 51 dashboard tests at 88.28% statement coverage and 14 Playwright tests. A pre-existing dispatch test race now waits for the actual POST response before inspecting the stand-in. Live verification remains deferred to the final one-seed pass.
+Security Phase 4 is verified offline: static dashboard/Lambda behavior and Lambda database lifecycle are covered, and `npm run check` with root `.env` absent passes 241 Python tests at 93.87% coverage, 51 Vitest tests at 88.28% statement coverage, 14 Playwright tests, and the isolated server import. The server group installs 26 distributions. Both production builds (root `.env` and process-environment values with `.env` absent) completed without build warnings. The full Python check emitted one upstream Mangum event-loop deprecation warning; it was not suppressed. The refreshed Linux x86_64/Python 3.12 ZIP is 20,183,161 bytes (20.183161 decimal MB) at `/private/var/folders/lt/qmlktfbd38x783kbt_1_p4br0000gn/T/opencode/undercover-lambda.NpextJ/undercover-app.zip`; its contents were verified. No AWS resources were created.
+
+## Current live verification (2026-11-14)
+
+One seed completed successfully with the default `openai/gpt-6-luna` / low configuration; the original `.env` was restored. Startup showed 26 waiting claims. Dana signed in to the dashboard, which showed all 26 claims. Health returned 200 and an agent-only route without a key returned 401.
+
+The named CLI run for `CLM-1001` approved and paid $420.00. Its ledger records 12 model calls, including one screening call; reported cost was $0.00291554, with 50,689 prompt tokens and 987 completion tokens (51,676 total).
+
+The N=3 dispatch (run 1) ended with status `completed` but did not decide or refer any claims: all 25 remaining claims were left for handlers. OpenRouter returned HTTP 402 because the request's 8,192-token output limit exceeded its affordable 7,152 tokens. The dispatch ledger has zero tokens and $0 cost. `CLM-1901` was left for a handler before screening: no decision, security-screen activity or model ledger row. The tiny evaluation was not started, no judge call occurred, and handler sign-off was not attempted because no held approvals resulted. Current operational state is one paid claim and 25 claims left for handlers; the dispatch status is not evidence of successful claim processing.
+
+Standalone and Lambda-mode browser checks used headless Playwright via Node and each showed 26 claims with no console or page errors; the Lambda-mode check used the transaction pooler on port 6543. The requested authenticated Playwright MCP verification was not completed. All services were stopped; `.env` remains restored. There was no second seed or AWS activity.
+
+## Earlier implementation checkpoints
+
+Security Phase 3 adds the generated eight-operation agent OpenAPI, shared policy/history reads, current-limit-first public payment guard, and atomic sign-off/payment without an agent-service notification. Failure injection proves sign-off and payment roll back together; repeated graph resume makes no payment call. The complete no-`.env` gate passes 234 Python tests at 93.79% coverage, 51 dashboard tests at 88.28% statement coverage and 14 Playwright tests. A pre-existing dispatch test race now waits for the actual POST response before inspecting the stand-in. At the Phase 3 handoff, live verification remained deferred to the final one-seed pass.
 
 Security Phase 2 adds the first durable hidden-instruction screen, fixed outside versioned instructions, with reported usage on every attempt and round-budget checks before retries. A flagged claim is referred without invoking the claim model. The queue seeds 26 claims; unlabelled `CLM-1901` stays out of both evaluation sets. The no-`.env` full gate passes 228 Python tests at 93.84% coverage, 51 dashboard tests at 88.28% statement coverage, and 14 Playwright tests. Resume/sign-off, same-claim fresh threads, provider timeout/error, parse exhaustion and screening cost aggregation have stub coverage. No live reseed or model call has run.
 
@@ -23,9 +37,9 @@ uv sync
 npm install
 ```
 
-For hosted/live work, set `DATABASE_URL`, `OPENROUTER_API_KEY`, `LANGFUSE_SECRET_KEY`, `LANGFUSE_PUBLIC_KEY`, `LANGFUSE_BASE_URL`, `VITE_SUPABASE_URL`, `VITE_SUPABASE_PUBLISHABLE_KEY` and `HANDLER_PASSWORD` in `.env`. The Supabase project needs the three handler users with sign-up disabled and asymmetric JWT signing keys; no Supabase secret is used. `UNDERCOVER_AGENT` is optional and defaults to `http://127.0.0.1:8002`.
+For hosted/live work, set `DATABASE_URL`, `UNDERCOVER_API_KEY`, `OPENROUTER_API_KEY`, `LANGFUSE_SECRET_KEY`, `LANGFUSE_PUBLIC_KEY`, `LANGFUSE_BASE_URL`, `VITE_SUPABASE_URL`, `VITE_SUPABASE_PUBLISHABLE_KEY` and `HANDLER_PASSWORD` in `.env`. The Supabase project needs the three handler users with sign-up disabled and asymmetric JWT signing keys; no Supabase secret is used. `UNDERCOVER_AGENT` is optional and defaults to `http://127.0.0.1:8002`.
 
-The seeded default configuration is `openai/gpt-6-luna` with low reasoning. Seeding with `MODEL_NAME` instead creates that model at `default` reasoning and a zero-price one-model catalog. Runs pin their configuration version; the service no longer independently chooses a model for each claim. Tests do not read `.env` and need no hosted service. Vite reads root `.env` only in development mode; tests use explicit local values.
+The seeded default configuration is `openai/gpt-6-luna` with low reasoning. Seeding with `MODEL_NAME` instead creates that model at `default` reasoning and a zero-price one-model catalog. Runs pin their configuration version; the service no longer independently chooses a model for each claim. Tests do not read `.env` and need no hosted service. Vite development and production builds can read root `.env` or process environment values; test mode uses its own environment and never reads root `.env`.
 
 Configuration replaces Instructions. Settings displays the approval limit, improvement objectives/noise/tolerance/budget/concurrency and the read-only model catalog. Senior handlers confirm platform changes; every changed value records its handler and time. A changed approval limit applies to new decisions, while old approvals retain their original sign-off requirement. Light/dark/system appearance stays in this browser.
 
@@ -63,7 +77,7 @@ With the services running, `uv run -m agent CLM-1001` works only that named clai
 npm run check
 ```
 
-This runs Ruff, Pyright, pytest with at least 80% coverage, Prettier, ESLint, tsc, Vitest with at least 80% coverage, and Playwright. Stop development services first so Playwright can start isolated services.
+This runs Ruff, Pyright, pytest with at least 80% coverage, an isolated `server`-group import, Prettier, ESLint, tsc, Vitest with at least 80% coverage, and Playwright. Stop development services first so Playwright can start isolated services.
 
 ## Verification
 

@@ -52,6 +52,10 @@ Our goal is to handle claims straight through, as accurately as our handlers do.
 
 The generated `/api/agent/openapi.json` document contains exactly `get_claim`, `get_policy`, `get_claim_history`, `search_documents`, `read_section`, `calculate_payout`, `record_decision` and `pay_claim`. It accepts the key or handler sign-in, has no deployment address or key tool input, and excludes handler actions, runs, evaluations and improvement.
 
+The backend can serve the built dashboard and API at one address as an ordinary web server or through a Lambda handler. Lambda invocation does not run startup seeding or write local files; Supabase holds the existing records. Laptop development remains supported, and this build creates no cloud resources.
+
+`npm run build` writes `dashboard/dist` using `VITE_SUPABASE_URL` and `VITE_SUPABASE_PUBLISHABLE_KEY` from root `.env` or the process environment; tests never read root `.env`. Lambda uses `backend.main.handler`, with `DATABASE_URL`, `VITE_SUPABASE_URL` and `UNDERCOVER_API_KEY`; its database connects through Supabase's transaction pooler on port 6543.
+
 ## Our records
 
 Everything is in `data/`, described in `data/README.md`: the claims queue, the policies, the customers, the plans, the handlers, the policy wording and the claims manual. The held-out claims in `data/evals/` are for checking the agent later and stay out of the queue.
