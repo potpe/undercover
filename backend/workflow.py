@@ -123,6 +123,12 @@ def sign_off(claim_id: str, handler_id: str) -> None:
                 "Handler cannot approve over-limit payouts",
                 status_code=403,
             )
+        if (
+            row["signed_off_by"] == handler_id
+            and row["paid_amount"] is not None
+            and float(row["paid_amount"]) == float(row["payout"])
+        ):
+            return
         if row["status"] != "waiting_for_sign_off" or not row["sign_off_required"]:
             reject(connection, claim_id, "Claim does not need sign-off")
         if row["paid_amount"] is not None:
@@ -132,55 +138,70 @@ def sign_off(claim_id: str, handler_id: str) -> None:
         connection.execute(
             update(claims_table)
             .where(claims_table.c.claim_id == claim_id)
-            .values(
-                signed_off_by=handler_id,
-                signed_off_at=timestamp(),
-                status="in_progress",
-            )
+            .values(signed_off_by=handler_id, signed_off_at=timestamp())
         )
         insert_activity(
             connection,
             claim_id,
             f"Payment signed off by {handler['name']}",
         )
+        _record_payment(
+            connection,
+            claim_id,
+            PaymentRequest(amount=float(row["payout"])),
+            require_sign_off=True,
+        )
+
+
+def _record_payment(
+    connection: Connection,
+    claim_id: str,
+    request: PaymentRequest,
+    *,
+    require_sign_off: bool = False,
+) -> None:
+    row = claim_row(connection, claim_id)
+    if row["paid_amount"] is not None and request.amount == float(row["paid_amount"]):
+        return
+    if row["decision"] != "approve":
+        reject(connection, claim_id, "Claim has no approval to pay", action="Payment")
+    if request.amount != float(row["payout"]):
+        reject(
+            connection,
+            claim_id,
+            "Payment must equal the approved payout",
+            action="Payment",
+        )
+    if require_sign_off and not row["signed_off_by"]:
+        reject(
+            connection, claim_id, "Payment requires handler sign-off", action="Payment"
+        )
+    if row["sign_off_required"] and not row["signed_off_by"]:
+        limit = float(row["approval_limit"])
+        message = f"Payout over {money(limit)} requires handler sign-off"
+        insert_activity(connection, claim_id, f"Payment blocked: {message}")
+        connection.commit()
+        raise HTTPException(status_code=409, detail=message)
+    connection.execute(
+        update(claims_table)
+        .where(claims_table.c.claim_id == claim_id)
+        .values(paid_amount=request.amount, status="decided", paid_at=timestamp())
+    )
+    insert_activity(connection, claim_id, f"Payment recorded: {money(request.amount)}")
 
 
 def record_payment(claim_id: str, request: PaymentRequest) -> None:
     with connect() as connection:
-        row = claim_row(connection, claim_id)
-        if row["paid_amount"] is not None and request.amount == float(
-            row["paid_amount"]
-        ):
-            return
-        if row["decision"] != "approve":
-            reject(
-                connection, claim_id, "Claim has no approval to pay", action="Payment"
+        current_limit = approval_limit(connection)
+        if request.amount > current_limit:
+            detail = (
+                f"Payment exceeds the current approval limit of {money(current_limit)}"
             )
-        if request.amount != float(row["payout"]):
-            reject(
-                connection,
-                claim_id,
-                "Payment must equal the approved payout",
-                action="Payment",
+            raise HTTPException(
+                status_code=403,
+                detail=detail,
             )
-        if row["sign_off_required"] and not row["signed_off_by"]:
-            limit = float(row["approval_limit"])
-            message = f"Payout over {money(limit)} requires handler sign-off"
-            insert_activity(connection, claim_id, f"Payment blocked: {message}")
-            connection.commit()
-            raise HTTPException(status_code=409, detail=message)
-        connection.execute(
-            update(claims_table)
-            .where(claims_table.c.claim_id == claim_id)
-            .values(
-                paid_amount=request.amount,
-                status="decided",
-                paid_at=timestamp(),
-            )
-        )
-        insert_activity(
-            connection, claim_id, f"Payment recorded: {money(request.amount)}"
-        )
+        _record_payment(connection, claim_id, request)
 
 
 def start_run(claim_id: str, thread_id: str | None = None) -> None:

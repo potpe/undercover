@@ -1,5 +1,7 @@
 # Status
 
+Security Phase 3 adds the generated eight-operation agent OpenAPI, shared policy/history reads, current-limit-first public payment guard, and atomic sign-off/payment without an agent-service notification. Failure injection proves sign-off and payment roll back together; repeated graph resume makes no payment call. The complete no-`.env` gate passes 234 Python tests at 93.79% coverage, 51 dashboard tests at 88.28% statement coverage and 14 Playwright tests. A pre-existing dispatch test race now waits for the actual POST response before inspecting the stand-in. Live verification remains deferred to the final one-seed pass.
+
 Security Phase 2 adds the first durable hidden-instruction screen, fixed outside versioned instructions, with reported usage on every attempt and round-budget checks before retries. A flagged claim is referred without invoking the claim model. The queue seeds 26 claims; unlabelled `CLM-1901` stays out of both evaluation sets. The no-`.env` full gate passes 228 Python tests at 93.84% coverage, 51 dashboard tests at 88.28% statement coverage, and 14 Playwright tests. Resume/sign-off, same-claim fresh threads, provider timeout/error, parse exhaustion and screening cost aggregation have stub coverage. No live reseed or model call has run.
 
 Security Phase 1 adds request-time agent API-key authentication, explicit route credential boundaries, handler bearer tokens on every dashboard request, and a key-only named-claim CLI start followed by direct graph execution. `UNDERCOVER_API_KEY` must contain a random value of at least 32 characters. The backend starts without it but refuses agent-only requests; the agent service fails before recovery when it is missing. The key never grants handler permissions.
@@ -51,7 +53,7 @@ On Scoreboard, choose Evaluation set or Held-out set, the whole set or its five 
 
 On Improvement, a senior handler can start or stop one round, review configuration/recipe proposals, approve or reject with a reason, and inspect round history and held-out version scores. Approval waits survive service restart. The complete round loop is verified offline with stubs; do not run live rounds as part of the offline check.
 
-Over-limit operational approvals wait for sign-off. Signing off saves the handler/time, shows In progress, then resumes the same thread and pays once. Evaluation approvals held for sign-off count as finished, stay unpaid and cannot be signed off.
+Over-limit operational approvals wait for sign-off. Signing off saves the handler/time and payment atomically, immediately showing Decided without contacting the agent service. A saved agent thread can finish later without another payment call. The public agent payment API refuses amounts over the current settings limit before claim lookup. Evaluation approvals held for sign-off count as finished, stay unpaid and cannot be signed off.
 
 With the services running, `uv run -m agent CLM-1001` works only that named claim with no dispatch/evaluation.
 

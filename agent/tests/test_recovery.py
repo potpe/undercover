@@ -162,9 +162,16 @@ def test_signoff_saved_while_agent_is_down_is_recovered(client, monkeypatch):
     assert service.execute_stored_run(run_id) == "completed"
 
     signed = client.post("/api/claims/CLM-1003/sign-off", json={"handler_id": "HND-01"})
-    assert signed.json()["claim"]["status"] == "in_progress"
-    assert signed.json()["paid_amount"] is None
+    assert signed.json()["claim"]["status"] == "decided"
+    assert signed.json()["paid_amount"] == 3750
 
+    monkeypatch.setattr(
+        main,
+        "save_payment",
+        lambda *args: (_ for _ in ()).throw(
+            AssertionError("Recovered sign-off must not record payment again")
+        ),
+    )
     with TestClient(service.app):
         pass
 

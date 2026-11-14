@@ -122,7 +122,7 @@ test("a decided claim shows its payout, reason, policy and activity", async ({
   await expect(page.getByRole("button", { name: "Run agent" })).toHaveCount(0);
 });
 
-test("handler sign-off reaches the agent service without direct payment", async ({
+test("handler sign-off pays immediately without resuming the agent service", async ({
   page,
   request,
 }) => {
@@ -145,7 +145,7 @@ test("handler sign-off reaches the agent service without direct payment", async 
     "http://127.0.0.1:8000/api/claims/CLM-1003/payment",
     { data: { amount: 3750 }, headers: agentHeaders },
   );
-  expect(blocked.status()).toBe(409);
+  expect(blocked.status()).toBe(403);
 
   await page.goto("/");
   await page.getByRole("button", { name: "View claim CLM-1003" }).click();
@@ -157,13 +157,13 @@ test("handler sign-off reaches the agent service without direct payment", async 
   ).toHaveCount(0);
   await page.getByRole("button", { name: "Sign off payout" }).click();
 
-  await expect(page.locator(".status-in_progress")).toHaveText("In progress");
+  await expect(page.locator(".status-decided")).toHaveText("Decided");
   await expect(page.getByText(/Signed off by Dana Whitfield at/)).toBeVisible();
   await expect(
     page.locator(".decision-summary").getByText("Payment recorded: $3,750.00", {
       exact: true,
     }),
-  ).toHaveCount(0);
+  ).toHaveCount(1);
   const result = await request.get(
     "http://127.0.0.1:8000/api/claims/CLM-1003",
     {
@@ -171,18 +171,46 @@ test("handler sign-off reaches the agent service without direct payment", async 
     },
   );
   const body = (await result.json()) as {
+    claim: { status: string };
     paid_amount: number | null;
     signed_off_by: string | null;
     signed_off_at: string | null;
+    paid_at: string | null;
+    activity: { message: string }[];
   };
-  expect(body.paid_amount).toBeNull();
+  expect(result.ok()).toBe(true);
+  expect(body.claim.status).toBe("decided");
+  expect(body.paid_amount).toBe(3750);
   expect(body.signed_off_by).toBe("HND-01");
   expect(body.signed_off_at).not.toBeNull();
+  expect(body.paid_at).not.toBeNull();
+  expect(
+    body.activity.filter(
+      (entry) => entry.message === "Payment recorded: $3,750.00",
+    ),
+  ).toHaveLength(1);
+  const repeatedSignOff = await request.post(
+    "http://127.0.0.1:8000/api/claims/CLM-1003/sign-off",
+    { headers: await handlerHeaders(request) },
+  );
+  expect(repeatedSignOff.status()).toBe(200);
+  const unchanged = await request.get(
+    "http://127.0.0.1:8000/api/claims/CLM-1003",
+    { headers: agentHeaders },
+  );
+  const unchangedBody = (await unchanged.json()) as typeof body;
+  expect(unchangedBody.claim.status).toBe("decided");
+  expect(unchangedBody.paid_amount).toBe(3750);
+  expect(
+    unchangedBody.activity.filter(
+      (entry) => entry.message === "Payment recorded: $3,750.00",
+    ),
+  ).toHaveLength(1);
   const calls = await request.get("http://127.0.0.1:8003/requests");
   const requests = (await calls.json()) as { method: string; url: string }[];
   expect(
     requests.filter((entry) => entry.url === "/claims/CLM-1003/resume"),
-  ).toHaveLength(1);
+  ).toHaveLength(0);
 });
 
 test("the dashboard shows dispatch claims, record summary and sections read", async ({
@@ -310,7 +338,13 @@ test("starting a dispatch sends N to the agent service", async ({
 }) => {
   await page.goto("/");
   await page.getByLabel("Agents at once").fill("5");
+  const started = page.waitForResponse(
+    (response) =>
+      response.url().endsWith("/api/dispatches") &&
+      response.request().method() === "POST",
+  );
   await page.getByRole("button", { name: "Start dispatch" }).click();
+  expect((await started).ok()).toBe(true);
 
   const calls = await request.get("http://127.0.0.1:8003/requests");
   const requests = (await calls.json()) as {

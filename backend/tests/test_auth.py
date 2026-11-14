@@ -123,11 +123,17 @@ def test_agent_only_and_shared_read_credentials(client, monkeypatch):
         == 200
     )
     assert client.get("/api/claims").status_code == 200
+    assert client.get("/api/policies/POL-2001").status_code == 200
+    assert client.get("/api/customers/CUS-3001/history").status_code == 200
+    assert client.get("/api/agent/openapi.json").status_code == 200
 
     client.headers.pop("X-API-Key")
     assert client.get("/api/claims").status_code == 401
     client.headers["Authorization"] = "Bearer dana-token"
     assert client.get("/api/claims").status_code == 200
+    assert client.get("/api/policies/POL-2001").status_code == 200
+    assert client.get("/api/customers/CUS-3001/history").status_code == 200
+    assert client.get("/api/agent/openapi.json").status_code == 200
     monkeypatch.delenv("UNDERCOVER_API_KEY")
     client.headers.pop("Authorization")
     assert client.get("/api/claims").status_code == 401
@@ -158,6 +164,9 @@ def test_registered_api_routes_match_explicit_dependency_inventory():
         ("GET", "/api/claims"): {"agent_or_handler"},
         ("POST", "/api/internal/claims/{claim_id}/work"): {"agent_key"},
         ("GET", "/api/claims/{claim_id}"): {"agent_or_handler"},
+        ("GET", "/api/policies/{policy_id}"): {"agent_or_handler"},
+        ("GET", "/api/customers/{customer_id}/history"): {"agent_or_handler"},
+        ("GET", "/api/agent/openapi.json"): {"agent_or_handler"},
         ("POST", "/api/claims/{claim_id}/payout"): {"agent_key"},
         ("POST", "/api/claims/{claim_id}/decision"): {"agent_key"},
         ("GET", "/api/me"): {"current_handler"},

@@ -130,13 +130,13 @@ Implement the filtered generated OpenAPI document, required operation names/read
 
 ### Success criteria
 
-- [ ] With the key and with a handler token, `GET /api/agent/openapi.json` returns exactly the eight required operation ids and no others; with neither it returns 401. The root document has no `servers` entry and no `X-API-Key` parameter/security-derived tool input.
-- [ ] Every included operation retains a one-line description and required inputs; `pay_claim` exposes a required numeric `amount`, and the new policy/history operations return the same records already present in the claim bundle. The full backend OpenAPI rules still pass with unique ids.
-- [ ] A payment above the current configured limit returns 403 naming that limit on a claim that was never approved; an unknown claim returns the identical response, proving the guard runs before claim lookup. A test with a changed setting proves the limit is read from settings, and exactly-at-limit payments retain their normal rules.
-- [ ] Dana's sign-off of a held operational approval returns `decided` with the approved `paid_amount`, `paid_at`, one sign-off and one payment activity, and no agent-service call. Repeating sign-off cannot create another payment; evaluation-copy sign-off remains forbidden.
-- [ ] A graph test resumes a saved sign-off interrupt with `save_payment` instrumented and proves no payment call occurs, the existing paid result is preserved, and a repeated resume is idempotent. Small approvals still use the graph's payment node exactly once.
-- [ ] Playwright's held-payout scenario now observes payment immediately after Dana signs off, exactly one recorded payment and no `/claims/{claim_id}/resume` request to the agent stand-in.
-- [ ] `npm run check` passes with root `.env` absent and all coverage thresholds intact. Update `docs/SPEC.md`, `docs/TECH_STACK.md`, `docs/PROCESS.md` and `docs/STATUS.md` for the eight-operation API and sign-off that pays; tick verified items and commit Phase 3.
+- [x] With the key and with a handler token, `GET /api/agent/openapi.json` returns exactly the eight required operation ids and no others; with neither it returns 401. The root document has no `servers` entry and no `X-API-Key` parameter/security-derived tool input.
+- [x] Every included operation retains a one-line description and required inputs; `pay_claim` exposes a required numeric `amount`, and the new policy/history operations return the same records already present in the claim bundle. The full backend OpenAPI rules still pass with unique ids.
+- [x] A payment above the current configured limit returns 403 naming that limit on a claim that was never approved; an unknown claim returns the identical response, proving the guard runs before claim lookup. A test with a changed setting proves the limit is read from settings, and exactly-at-limit payments retain their normal rules.
+- [x] Dana's sign-off of a held operational approval returns `decided` with the approved `paid_amount`, `paid_at`, one sign-off and one payment activity, and no agent-service call. Repeating sign-off cannot create another payment; evaluation-copy sign-off remains forbidden.
+- [x] A graph test resumes a saved sign-off interrupt with `save_payment` instrumented and proves no payment call occurs, the existing paid result is preserved, and a repeated resume is idempotent. Small approvals still use the graph's payment node exactly once.
+- [x] Playwright's held-payout scenario now observes payment immediately after Dana signs off, exactly one recorded payment and no `/claims/{claim_id}/resume` request to the agent stand-in.
+- [x] `npm run check` passes with root `.env` absent and all coverage thresholds intact. Update `docs/SPEC.md`, `docs/TECH_STACK.md`, `docs/PROCESS.md` and `docs/STATUS.md` for the eight-operation API and sign-off that pays; tick verified items and commit Phase 3.
 
 ## Phase 4: Ready for Lambda
 

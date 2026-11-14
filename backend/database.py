@@ -702,6 +702,23 @@ def get_claim_bundle(claim_id: str) -> dict[str, Any] | None:
     }
 
 
+def get_policy(policy_id: str) -> dict[str, Any] | None:
+    with connect() as connection:
+        return connection.execute(
+            select(policies_table.c.data).where(policies_table.c.policy_id == policy_id)
+        ).scalar_one_or_none()
+
+
+def get_customer_history(customer_id: str) -> list[dict[str, Any]] | None:
+    with connect() as connection:
+        customer = connection.execute(
+            select(customers_table.c.data).where(
+                customers_table.c.customer_id == customer_id
+            )
+        ).scalar_one_or_none()
+    return customer["previous_claims"] if customer is not None else None
+
+
 def list_handlers() -> list[dict[str, Any]]:
     with connect() as connection:
         rows = (

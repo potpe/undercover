@@ -422,7 +422,17 @@ def build_claim_graph(
 
     def approval(state: ClaimState) -> dict[str, Any]:
         answer = interrupt({"claim_id": state["claim_id"], "payout": state["payout"]})
-        return {"approved_by": answer["handler_id"], "claim_status": "in_progress"}
+        bundle = current_bundle(state["claim_id"])
+        if bundle["paid_amount"] is None:
+            raise RuntimeError("Signed-off claim has no recorded payment")
+        return {
+            "approved_by": answer["handler_id"],
+            "claim_status": "decided",
+            "result": (
+                f"{state['claim_id']}: approve ${bundle['paid_amount']:,.2f}; "
+                "payment recorded"
+            ),
+        }
 
     def pay(state: ClaimState) -> dict[str, Any]:
         save_payment(state["claim_id"], state["payout"])
@@ -450,7 +460,7 @@ def build_claim_graph(
     builder.add_conditional_edges(
         "record_decision", route_after_decision, ["approval", "pay", END]
     )
-    builder.add_edge("approval", "pay")
+    builder.add_edge("approval", END)
     builder.add_edge("pay", END)
     return builder.compile(checkpointer=checkpointer)
 

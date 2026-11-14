@@ -2,6 +2,7 @@ import pytest
 from sqlalchemy import select
 from sqlalchemy.dialects import postgresql
 
+from backend import workflow
 from backend.database import claims_table
 
 
@@ -48,33 +49,54 @@ def test_over_limit_payment_waits_for_sign_off(client):
     decide(client, claim_id="CLM-1003", payout=3750.0)
 
     blocked = pay(client, claim_id="CLM-1003", amount=3750.0)
-    assert blocked.status_code == 409
+    assert blocked.status_code == 403
     assert blocked.json() == {
-        "detail": "Payout over $1,000.00 requires handler sign-off"
+        "detail": "Payment exceeds the current approval limit of $1,000.00"
     }
     bundle = client.get("/api/claims/CLM-1003").json()
     assert bundle["claim"]["status"] == "waiting_for_sign_off"
     assert bundle["paid_amount"] is None
-    assert bundle["activity"][-1]["message"] == (
-        "Payment blocked: Payout over $1,000.00 requires handler sign-off"
-    )
+    assert not any("Payment blocked" in item["message"] for item in bundle["activity"])
 
     sign_off = client.post(
         "/api/claims/CLM-1003/sign-off", json={"handler_id": "HND-01"}
     )
     assert sign_off.status_code == 200
     assert sign_off.json()["signed_off_by"] == "HND-01"
-    assert sign_off.json()["paid_amount"] is None
+    assert sign_off.json()["paid_amount"] == 3750.0
     assert sign_off.json()["signed_off_at"] is not None
-    assert sign_off.json()["claim"]["status"] == "in_progress"
+    assert sign_off.json()["paid_at"] is not None
+    assert sign_off.json()["claim"]["status"] == "decided"
 
-    paid = pay(client, claim_id="CLM-1003", amount=3750.0)
-    assert paid.status_code == 200
-    assert paid.json()["claim"]["status"] == "decided"
-    assert paid.json()["paid_amount"] == 3750.0
-    assert paid.json()["signed_off_by"] == "HND-01"
-    assert paid.json()["signed_off_at"] is not None
-    assert paid.json()["paid_at"] is not None
+    assert pay(client, claim_id="CLM-1003", amount=3750.0).status_code == 403
+    repeated = client.post(
+        "/api/claims/CLM-1003/sign-off", json={"handler_id": "HND-01"}
+    )
+    assert repeated.status_code == 200
+    assert repeated.json()["paid_amount"] == 3750.0
+    activity = [entry["message"] for entry in repeated.json()["activity"]]
+    assert activity.count("Payment signed off by Dana Whitfield") == 1
+    assert activity.count("Payment recorded: $3,750.00") == 1
+
+
+def test_signoff_and_payment_roll_back_together_on_payment_failure(client, monkeypatch):
+    decide(client, claim_id="CLM-1003", payout=3750.0)
+    before = client.get("/api/claims/CLM-1003").json()
+
+    def fail_payment(*args, **kwargs):
+        raise RuntimeError("Injected payment failure")
+
+    monkeypatch.setattr(workflow, "_record_payment", fail_payment)
+    with pytest.raises(RuntimeError, match="Injected payment failure"):
+        client.post("/api/claims/CLM-1003/sign-off", json={"handler_id": "HND-01"})
+
+    after = client.get("/api/claims/CLM-1003").json()
+    assert after == before
+    assert after["signed_off_by"] is None
+    assert after["signed_off_at"] is None
+    assert after["paid_amount"] is None
+    assert after["paid_at"] is None
+    assert after["claim"]["status"] == "waiting_for_sign_off"
 
 
 def test_exactly_one_thousand_dollars_does_not_need_sign_off(client):
@@ -84,6 +106,48 @@ def test_exactly_one_thousand_dollars_does_not_need_sign_off(client):
 
     assert response.status_code == 200
     assert response.json()["claim"]["status"] == "decided"
+
+
+def test_over_limit_payment_is_rejected_before_claim_lookup(client):
+    unknown = pay(client, amount=1000.01, claim_id="CLM-9999")
+    waiting = pay(client, amount=1000.01, claim_id="CLM-1001")
+
+    assert unknown.status_code == waiting.status_code == 403
+    assert (
+        unknown.json()
+        == waiting.json()
+        == {"detail": "Payment exceeds the current approval limit of $1,000.00"}
+    )
+
+
+def test_over_limit_payment_guard_reads_changed_setting(client):
+    changed = client.put(
+        "/api/settings",
+        json={
+            "approval_limit": 500,
+            "objectives": {"accuracy": 0.6, "grade": 1.0},
+            "noise": {
+                "accuracy": 0.1,
+                "grade": 0.15,
+                "cost_per_claim": 0.15,
+                "seconds_per_claim": 0.15,
+            },
+            "tolerance": {
+                "accuracy": 0.1,
+                "grade": 0.15,
+                "cost_per_claim": 1.0,
+                "seconds_per_claim": 0.25,
+            },
+            "spending_limit": 0.5,
+            "evaluation_concurrency": 25,
+        },
+    )
+    assert changed.status_code == 200
+    unknown = pay(client, amount=500.01, claim_id="CLM-9999")
+    assert unknown.status_code == 403
+    assert unknown.json() == {
+        "detail": "Payment exceeds the current approval limit of $500.00"
+    }
 
 
 def test_payment_must_equal_the_approved_payout(client):

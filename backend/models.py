@@ -470,3 +470,25 @@ class ClaimBundle(BaseModel):
     evaluation_run_id: int | None
     activity: list[Activity]
     documents_read: list[DocumentRead]
+
+
+class PolicyRecord(BaseModel):
+    policy_id: str
+    customer_id: str
+    plan: str
+    add_ons: list[str]
+    purchased_on: str
+    sold_through: str
+    trip: dict[str, Any]
+    travelers: list[str]
+    status: str
+
+
+class PreviousClaim(BaseModel):
+    claim_id: str
+    filed_on: str
+    incident_date: str
+    claim_type: str
+    summary: str
+    outcome: str
+    amount_paid: float

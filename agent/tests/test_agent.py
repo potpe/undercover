@@ -640,7 +640,15 @@ def test_graph_interrupts_and_resumes_an_over_limit_claim(client, monkeypatch):
     assert "approval" in state.next
     assert state.interrupts[0].value["payout"] == 3750
 
-    client.post("/api/claims/CLM-1003/sign-off", json={"handler_id": "HND-01"})
+    signed = client.post("/api/claims/CLM-1003/sign-off", json={"handler_id": "HND-01"})
+    assert signed.json()["paid_amount"] == 3750
+    save_payment_calls = []
+
+    def unexpected_payment(*args):
+        save_payment_calls.append(args)
+        raise AssertionError("Sign-off resume must not pay a second time")
+
+    monkeypatch.setattr(main, "save_payment", unexpected_payment)
     paid = main.run_with_context("CLM-1003", "thread-held", run_id=1)
 
     assert paid == "CLM-1003: approve $3,750.00; payment recorded"
@@ -668,7 +676,9 @@ def test_graph_interrupts_and_resumes_an_over_limit_claim(client, monkeypatch):
 
     repeated = main.run_with_context("CLM-1003", "thread-held", run_id=1)
     assert repeated == paid
+    assert save_payment_calls == []
     assert client.get("/api/claims/CLM-1003").json() == bundle
+    assert len(payments) == 1
 
 
 def test_signoff_at_new_interrupt_resumes_payment_in_the_same_run(client, monkeypatch):

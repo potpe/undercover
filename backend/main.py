@@ -2,6 +2,7 @@
 
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
+from copy import deepcopy
 from http import HTTPStatus
 from typing import Annotated, Any
 
@@ -20,6 +21,8 @@ from backend.configurations import (
 from backend.database import (
     add_activity,
     get_claim_bundle,
+    get_customer_history,
+    get_policy,
     initialize_database,
     list_claims,
     list_handlers,
@@ -62,6 +65,8 @@ from backend.models import (
     PayoutRequest,
     PayoutResponse,
     PlatformSettings,
+    PolicyRecord,
+    PreviousClaim,
     RecipeHistory,
     RoundRecord,
     RunRecord,
@@ -252,6 +257,65 @@ def claim(claim_id: str) -> ClaimBundle:
     return ClaimBundle(**bundle)
 
 
+@app.get(
+    "/api/policies/{policy_id}",
+    operation_id="get_policy",
+    dependencies=[Depends(agent_or_handler)],
+)
+def policy(policy_id: str) -> PolicyRecord:
+    """Return one policy record."""
+    record = get_policy(policy_id)
+    if record is None:
+        raise HTTPException(status_code=404, detail="Policy not found")
+    return PolicyRecord(**record)
+
+
+@app.get(
+    "/api/customers/{customer_id}/history",
+    operation_id="get_claim_history",
+    dependencies=[Depends(agent_or_handler)],
+)
+def customer_history(customer_id: str) -> list[PreviousClaim]:
+    """Return a customer's previous claims."""
+    history = get_customer_history(customer_id)
+    if history is None:
+        raise HTTPException(status_code=404, detail="Customer not found")
+    return [PreviousClaim(**claim) for claim in history]
+
+
+@app.get(
+    "/api/agent/openapi.json",
+    operation_id="get_agent_openapi",
+    dependencies=[Depends(agent_or_handler)],
+)
+def agent_openapi() -> dict[str, Any]:
+    """Return the generated OpenAPI contract for claim-agent tools."""
+    operation_ids = {
+        "get_claim",
+        "get_policy",
+        "get_claim_history",
+        "search_documents",
+        "read_section",
+        "calculate_payout",
+        "record_decision",
+        "pay_claim",
+    }
+    schema = deepcopy(app.openapi())
+    schema.pop("servers", None)
+    filtered_paths: dict[str, Any] = {}
+    for path, path_item in schema["paths"].items():
+        filtered_item = {
+            key: operation
+            for key, operation in path_item.items()
+            if key in ("get", "post", "put", "patch", "delete", "options", "head")
+            and operation.get("operationId") in operation_ids
+        }
+        if filtered_item:
+            filtered_paths[path] = filtered_item
+    schema["paths"] = filtered_paths
+    return schema
+
+
 @app.post(
     "/api/claims/{claim_id}/payout",
     operation_id="calculate_payout",
@@ -284,12 +348,10 @@ def get_current_handler(
 @app.post("/api/claims/{claim_id}/sign-off", operation_id="sign_off_claim")
 def sign_off_claim(
     claim_id: str,
-    background_tasks: BackgroundTasks,
     handler: Annotated[dict[str, Any], Depends(current_handler)],
 ) -> ClaimBundle:
-    """Save the signed-in handler's sign-off and resume payment."""
+    """Save the handler's sign-off and pay the approved claim."""
     sign_off(claim_id, handler["handler_id"])
-    background_tasks.add_task(agent_service.notify_resume, claim_id)
     return claim(claim_id)
 
 
@@ -306,7 +368,7 @@ def fail_claim_recovery(claim_id: str, request: FailureRequest) -> ClaimBundle:
 
 @app.post(
     "/api/claims/{claim_id}/payment",
-    operation_id="record_payment",
+    operation_id="pay_claim",
     dependencies=[Depends(agent_key)],
 )
 def payment(claim_id: str, request: PaymentRequest) -> ClaimBundle:
@@ -560,7 +622,7 @@ def activity(claim_id: str, request: ActivityRequest) -> ClaimBundle:
 
 @app.post(
     "/api/claims/{claim_id}/document-search",
-    operation_id="search_claim_documents",
+    operation_id="search_documents",
     dependencies=[Depends(agent_key)],
 )
 def document_search(
@@ -577,7 +639,7 @@ def document_search(
 
 @app.post(
     "/api/claims/{claim_id}/document-section",
-    operation_id="read_claim_document",
+    operation_id="read_section",
     dependencies=[Depends(agent_key)],
 )
 def document_section(

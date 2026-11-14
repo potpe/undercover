@@ -18,6 +18,8 @@ Automated fixtures use a fixed, non-secret agent key and separate local handler 
 
 The first claim activity is the hidden-instruction check's result. Flagged claims become zero-payout referrals with the checker reason and `Security check` section. Each raw screening response contributes reported usage, including up to three structured-answer attempts. Saved claim progress does not repeat completed screening. Automated tests stub the checker independently of the claim model.
 
+Signing off an eligible held payout records its payment immediately and atomically in the backend. The agent service need not be running, and any later resume finishes without another payment call. The agent's public payment route refuses every amount above the current approval limit, even after sign-off. The key-or-handler-protected `/api/agent/openapi.json` is the generated eight-operation contract for the later Gateway; this build does not deploy it.
+
 ## Planning
 
 When asked to plan, as in "Please plan the pilot", write the plan to `docs/PLAN.md` and write no code.

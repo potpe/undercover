@@ -195,9 +195,13 @@ def recover_signed_off_claims() -> None:
         response = client.get("/api/claims")
     response.raise_for_status()
     for claim in response.json():
-        if claim["status"] == "in_progress":
+        if claim["status"] in ("in_progress", "decided"):
             bundle = current_bundle(claim["claim_id"])
-            if bundle["signed_off_by"] and bundle["agent_thread_id"]:
+            if (
+                bundle["signed_off_by"]
+                and bundle["paid_amount"] is not None
+                and bundle["agent_thread_id"]
+            ):
                 resume_claim(claim["claim_id"])
 
 

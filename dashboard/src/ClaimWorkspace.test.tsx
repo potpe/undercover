@@ -1,4 +1,10 @@
-import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import {
+  cleanup,
+  fireEvent,
+  render,
+  screen,
+  within,
+} from "@testing-library/react";
 import { afterEach, expect, it, vi } from "vitest";
 import type { ClaimBundle, ClaimStatus, DecisionKind, Handler } from "./api";
 import { ClaimWorkspace } from "./ClaimWorkspace";
@@ -290,31 +296,31 @@ it.each(["decline", "refer"] as const)(
   },
 );
 
-it("signs off and polls until the agent records an over-limit payment", async () => {
+it("shows the paid claim returned by an atomic over-limit sign-off", async () => {
   const waiting = makeBundle("waiting_for_sign_off", "approve", 3750);
-  const signed = {
+  const paid = {
     ...waiting,
-    claim: { ...waiting.claim, status: "in_progress" as const },
+    claim: { ...waiting.claim, status: "decided" as const },
     signed_off_by: "HND-01",
     signed_off_by_name: "Dana Whitfield",
     signed_off_at: "2026-11-09T12:00:00Z",
-  };
-  const paid = {
-    ...signed,
-    claim: { ...signed.claim, status: "decided" as const },
     paid_amount: 3750,
     paid_at: "2026-11-09T12:00:02Z",
+    activity: [
+      ...waiting.activity,
+      {
+        id: 2,
+        message: "Payment recorded: $3,750.00",
+        created_at: "2026-11-09T12:00:02Z",
+      },
+    ],
   };
-  let reads = 0;
   const fetchMock = mockDetail(waiting);
   fetchMock.mockImplementation(
     (input: RequestInfo | URL, init?: RequestInit) => {
       const url = requestUrl(input);
       if (url === "/api/claims/CLM-1001" && init?.method === undefined) {
-        reads += 1;
-        let current: ClaimBundle = paid;
-        if (reads === 1) current = waiting;
-        return Promise.resolve(response(current));
+        return Promise.resolve(response(waiting));
       }
       if (url === "/api/handlers") {
         return Promise.resolve(
@@ -330,8 +336,6 @@ it("signs off and polls until the agent records an over-limit payment", async ()
         );
       }
       if (url === "/api/claims/CLM-1001/sign-off")
-        return Promise.resolve(response(signed));
-      if (url === "/api/claims/CLM-1001/payment")
         return Promise.resolve(response(paid));
       return Promise.resolve(response({ detail: "Unexpected request" }, 500));
     },
@@ -346,14 +350,25 @@ it("signs off and polls until the agent records an over-limit payment", async ()
   expect(signOffButton).toHaveProperty("disabled", false);
   fireEvent.click(signOffButton);
 
-  expect(await screen.findByText("Payment recorded: $3,750.00")).toBeDefined();
+  expect(
+    await within(
+      screen.getByRole("region", { name: "Agent activity" }),
+    ).findByText("Payment recorded: $3,750.00"),
+  ).toBeDefined();
+  expect(screen.getByText("Decided")).toBeDefined();
   expect(screen.getByText(/Signed off by Dana Whitfield at/)).toBeDefined();
   expect(screen.getByText(/Paid at/)).toBeDefined();
+  expect(
+    within(screen.getByRole("region", { name: "Agent activity" })).getAllByText(
+      "Payment recorded: $3,750.00",
+    ),
+  ).toHaveLength(1);
   const urls = fetchMock.mock.calls.map(([input]) => requestUrl(input));
   expect(
     urls.filter((url) => url === "/api/claims/CLM-1001/sign-off"),
   ).toHaveLength(1);
   expect(urls).not.toContain("/api/claims/CLM-1001/payment");
+  expect(urls).not.toContain("/api/claims/CLM-1001/resume");
   expect(screen.queryByRole("button", { name: "Sign off payout" })).toBeNull();
 });
 

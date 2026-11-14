@@ -9,7 +9,6 @@ from langchain_core.messages import AIMessage
 from sqlalchemy import update
 
 from agent import dispatcher, main, service
-from backend import agent_service
 from backend import main as backend_main
 from backend.database import claims_table, connect
 from backend.models import DecisionRequest, DispatchRequest, PaymentRequest
@@ -319,7 +318,7 @@ def test_dispatch_skips_claim_already_resuming_after_signoff(client, monkeypatch
 
     assert called is False
     run = client.get(f"/api/internal/runs/{run_id}").json()
-    assert run["summary"]["in_progress"] == ["CLM-1003"]
+    assert run["summary"]["in_progress"] == []
 
 
 def test_signoff_resumes_held_claim_through_service_and_pays_once(client, monkeypatch):
@@ -368,9 +367,20 @@ def test_signoff_resumes_held_claim_through_service_and_pays_once(client, monkey
     assert held["claim"]["status"] == "waiting_for_sign_off"
     assert held["paid_amount"] is None
 
-    monkeypatch.setattr(agent_service, "notify_resume", service.resume_claim)
     signed = client.post("/api/claims/CLM-1003/sign-off", json={"handler_id": "HND-01"})
     assert signed.status_code == 200
+    assert signed.json()["claim"]["status"] == "decided"
+    monkeypatch.setattr(
+        main,
+        "save_payment",
+        lambda *args: (_ for _ in ()).throw(
+            AssertionError("Sign-off resume must not record payment again")
+        ),
+    )
+    assert (
+        service.resume_claim("CLM-1003")
+        == "CLM-1003: approve $3,750.00; payment recorded"
+    )
 
     paid = client.get("/api/claims/CLM-1003").json()
     assert paid["claim"]["status"] == "decided"

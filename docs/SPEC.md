@@ -21,7 +21,7 @@ For each claim the graph should:
 - use the backend's payout rules when it approves
 - explain the decision in two or three sentences, along with the relevant section of the policy
 
-The graph records the decision and owns the payment step. An approval that needs no sign-off is paid immediately. An approval over the limit pauses with its work saved until a handler signs off; the agent then resumes the same thread and pays it. Sign-off is saved even if the agent is temporarily unavailable.
+The graph records the decision and pays an approval that needs no sign-off immediately. An approval over the limit pauses with its work saved until a handler signs off. The backend records sign-off and payment atomically, without contacting the agent service. A resumed agent finishes the same thread without paying again.
 
 The screening check is outside versioned claim-agent configuration and cannot be changed by the improver. It uses Luna at `none`, or the platform's pinned one-model configuration with no reasoning effort. Every attempt's reported usage counts toward the claim and run cost. An unreadable answer has at most three attempts; errors stop claim-model work and follow normal failure handling. Completed screening is saved, so a resumed thread is not checked again; a fresh attempt is.
 
@@ -45,10 +45,12 @@ Our goal is to handle claims straight through, as accurately as our handlers do.
 
 ## Rules
 
-- A payout over $1,000 needs a handler's sign-off. The agent can approve such a claim, but the payment waits until a handler signs off. The system must block the payment until then, even if the agent tries to pay.
+- A payout over the configured approval limit (initially $1,000) needs a handler's sign-off. The agent can approve such a claim, but its payment API always refuses amounts above the current limit with 403 before looking up the claim. Only backend-owned handler sign-off can record an over-limit payment.
 - Decisions follow the policy wording and the claims manual. The policy wording is the contract and takes precedence.
 - Our handlers' own decisions on these claims are in `data/evals/`. We use them to check the agent's work. The agent must never see them.
 - Amounts are in US dollars.
+
+The generated `/api/agent/openapi.json` document contains exactly `get_claim`, `get_policy`, `get_claim_history`, `search_documents`, `read_section`, `calculate_payout`, `record_decision` and `pay_claim`. It accepts the key or handler sign-in, has no deployment address or key tool input, and excludes handler actions, runs, evaluations and improvement.
 
 ## Our records
 
