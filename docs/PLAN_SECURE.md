@@ -113,16 +113,16 @@ Implement the durable screening node, usage/activity recording, security seed da
 
 ### Success criteria
 
-- [ ] A model-construction test verifies default Luna/`none` screening and the one-model/default override with no reasoning argument; the checker is not present in versioned instructions, configuration proposals or the improver recipe.
-- [ ] A stub-screen test supplies a response containing the claim JSON and verifies it includes the complete customer story, items and documents plus the policy record, uses the lab instructions, and declares `reason` before `instructions_found`.
-- [ ] A flagged stub claim ends as a zero-payout referral with the screen's exact reason and `policy_section="Security check"`; the claim model receives no invocation and no claim content. The dashboard data shows the screening result as its first activity and the referral reason/section on the claim.
-- [ ] A passing stub claim follows the pre-existing tool/decision/payment path. Tests prove one screen per saved thread across ordinary resume, restart and sign-off, and a new first-message thread screens again.
-- [ ] Structured-output tests cover one and three unreadable attempts, and an error/timeout: all raw responses with usage are recorded, no failed screen reaches the claim model, three parse failures raise, and existing dispatch transient/ordinary failure behavior remains unchanged.
-- [ ] Usage tests prove every screen attempt contributes its reported tokens/cost to the claim, run and scoreboard totals, including a flagged claim whose only model call is the checker.
-- [ ] Seed tests return exactly 26 waiting operational claims including `CLM-1901`, its `POL-2901` policy and Derek Vance customer, while `data/claims.json` and `data/security/decisions.json` are unchanged and no security handler decision is stored.
-- [ ] Whole and tiny creation tests for both evaluation sets contain no source `CLM-1901`; evaluation-set counts and all five tiny claims remain as before, and seed output/documentation says 26 rather than 25.
-- [ ] Queue, claim-workspace and Playwright expectations are updated for the 26th claim without weakening existing assertions; no automated test calls a real screening or claim model.
-- [ ] `npm run check` passes with root `.env` absent and all coverage thresholds intact. Update `docs/SPEC.md`, `docs/TECH_STACK.md`, `docs/PROCESS.md`, `docs/STATUS.md` and `data/README.md`; tick verified items and commit Phase 2.
+- [x] A model-construction test verifies default Luna/`none` screening and the one-model/default override with no reasoning argument; the checker is not present in versioned instructions, configuration proposals or the improver recipe.
+- [x] A stub-screen test supplies a response containing the claim JSON and verifies it includes the complete customer story, items and documents plus the policy record, uses the lab instructions, and declares `reason` before `instructions_found`.
+- [x] A flagged stub claim ends as a zero-payout referral with the screen's exact reason and `policy_section="Security check"`; the claim model receives no invocation and no claim content. The dashboard data shows the screening result as its first activity and the referral reason/section on the claim.
+- [x] A passing stub claim follows the pre-existing tool/decision/payment path. Tests prove one screen per saved thread across ordinary resume, restart and sign-off, and a new first-message thread screens again.
+- [x] Structured-output tests cover one and three unreadable attempts, and an error/timeout: all raw responses with usage are recorded, no failed screen reaches the claim model, three parse failures raise, and existing dispatch transient/ordinary failure behavior remains unchanged.
+- [x] Usage tests prove every screen attempt contributes its reported tokens/cost to the claim, run and scoreboard totals, including a flagged claim whose only model call is the checker.
+- [x] Seed tests return exactly 26 waiting operational claims including `CLM-1901`, its `POL-2901` policy and Derek Vance customer, while `data/claims.json` and `data/security/decisions.json` are unchanged and no security handler decision is stored.
+- [x] Whole and tiny creation tests for both evaluation sets contain no source `CLM-1901`; evaluation-set counts and all five tiny claims remain as before, and seed output/documentation says 26 rather than 25.
+- [x] Queue, claim-workspace and Playwright expectations are updated for the 26th claim without weakening existing assertions; no automated test calls a real screening or claim model.
+- [x] `npm run check` passes with root `.env` absent and all coverage thresholds intact. Update `docs/SPEC.md`, `docs/TECH_STACK.md`, `docs/PROCESS.md`, `docs/STATUS.md` and `data/README.md`; tick verified items and commit Phase 2.
 
 ## Phase 3: The agent's own API and sign-off that pays
 

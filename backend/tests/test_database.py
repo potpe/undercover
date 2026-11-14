@@ -34,7 +34,8 @@ def test_reseed_restores_the_queue_and_clears_all_work(client):
 
     claims = client.get("/api/claims").json()
     bundle = client.get("/api/claims/CLM-1001").json()
-    assert len(claims) == 25
+    assert len(claims) == 26
+    assert claims[-1]["claim_id"] == "CLM-1901"
     assert {claim["status"] for claim in claims} == {"waiting"}
     assert bundle["decision"] is None
     assert bundle["activity"] == []

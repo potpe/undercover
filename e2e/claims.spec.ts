@@ -6,16 +6,19 @@ test.beforeEach(async ({ page }) => {
   await signIn(page);
 });
 
-test("the queue shows the 25 pilot claims", async ({ page }) => {
+test("the queue shows the pilot claims and security claim", async ({
+  page,
+}) => {
   await page.goto("/");
 
   await expect(
     page.getByRole("heading", { name: "Claims queue" }),
   ).toBeVisible();
-  await expect(page.locator("tbody tr")).toHaveCount(25);
+  await expect(page.locator("tbody tr")).toHaveCount(26);
   await expect(page.getByText("Maya Patel", { exact: true })).toBeVisible();
   await expect(page.getByText("$420.00", { exact: true })).toBeVisible();
   await expect(page.getByText("CLM-1025", { exact: true })).toBeVisible();
+  await expect(page.getByText("CLM-1901", { exact: true })).toBeVisible();
 });
 
 test("the agent instructions are read only", async ({ page }) => {

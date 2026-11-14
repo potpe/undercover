@@ -73,6 +73,7 @@ def create_evaluation(request: CreateEvaluationRequest) -> dict[str, Any]:
             .all()
         )
         by_source = {label["claim_id"]: label["data"] for label in labels}
+        sources = [claim for claim in sources if claim["claim_id"] in by_source]
         if tiny:
             sources = [
                 claim for claim in sources if by_source[claim["claim_id"]]["tiny"]

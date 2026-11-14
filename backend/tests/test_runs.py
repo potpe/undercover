@@ -57,7 +57,8 @@ def test_dispatch_selects_all_eligible_claims_oldest_first(client):
     expected = [
         claim["claim_id"]
         for claim in sorted(
-            json.loads(Path("data/claims.json").read_text()),
+            json.loads(Path("data/claims.json").read_text())
+            + json.loads(Path("data/security/claims.json").read_text()),
             key=lambda claim: (claim["submitted_on"], claim["claim_id"]),
         )
     ]
@@ -67,7 +68,8 @@ def test_dispatch_selects_all_eligible_claims_oldest_first(client):
     assert run["model_name"] == "openai/gpt-6-luna"
     assert run["reasoning_effort"] == "low"
     assert [claim["claim_id"] for claim in run["claims"]] == expected
-    assert len(run["claims"]) == 25
+    assert len(run["claims"]) == 26
+    assert "CLM-1901" in [claim["claim_id"] for claim in run["claims"]]
     assert client.get("/api/dispatches/current").json()["run_id"] == run["run_id"]
 
 
@@ -102,7 +104,8 @@ def test_dispatch_excludes_settled_held_handler_and_evaluation_claims(client):
     run = create_dispatch(client).json()
 
     assert "CLM-1004" in [claim["claim_id"] for claim in run["claims"]]
-    assert len(run["claims"]) == 21
+    assert len(run["claims"]) == 22
+    assert "CLM-1901" in [claim["claim_id"] for claim in run["claims"]]
     assert {
         "CLM-1001",
         "CLM-1002",

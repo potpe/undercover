@@ -1,5 +1,7 @@
 # Status
 
+Security Phase 2 adds the first durable hidden-instruction screen, fixed outside versioned instructions, with reported usage on every attempt and round-budget checks before retries. A flagged claim is referred without invoking the claim model. The queue seeds 26 claims; unlabelled `CLM-1901` stays out of both evaluation sets. The no-`.env` full gate passes 228 Python tests at 93.84% coverage, 51 dashboard tests at 88.28% statement coverage, and 14 Playwright tests. Resume/sign-off, same-claim fresh threads, provider timeout/error, parse exhaustion and screening cost aggregation have stub coverage. No live reseed or model call has run.
+
 Security Phase 1 adds request-time agent API-key authentication, explicit route credential boundaries, handler bearer tokens on every dashboard request, and a key-only named-claim CLI start followed by direct graph execution. `UNDERCOVER_API_KEY` must contain a random value of at least 32 characters. The backend starts without it but refuses agent-only requests; the agent service fails before recovery when it is missing. The key never grants handler permissions.
 
 Security Phase 1's complete `npm run check` passes with root `.env` absent and safely restored: 216 Python tests at 93.70% coverage, 51 dashboard tests at 88.28% statement coverage, and all 14 Playwright tests. Agent-side test clients carry only the fixed non-secret service key, while local handler sessions remain separate. Removing bearer injection makes all three new API regression tests fail. A separate security review found no required corrections after replacing path middleware with explicit route dependencies. No live reseed or model call has run.
@@ -33,7 +35,7 @@ Stop development services, then run:
 npm run seed
 ```
 
-This intentionally resets the selected database, including decisions, payments, runs, evaluations, ledgers, activity and checkpoints. It restores exactly 25 waiting operational claims and the separate evaluation sources/labels, with an empty scoreboard. Normal startup preserves work, and evaluations need no reseed.
+This intentionally resets the selected database, including decisions, payments, runs, evaluations, ledgers, activity and checkpoints. It restores exactly 26 waiting operational claims and the separate evaluation sources/labels, with an empty scoreboard. `CLM-1901` includes its security policy/customer but no handler decision and enters neither evaluation set. Normal startup preserves work, and evaluations need no reseed.
 
 ## Run
 

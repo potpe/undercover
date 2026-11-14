@@ -1,14 +1,15 @@
 from backend.database import add_activity, initialize_database
 
 
-def test_queue_contains_only_the_25_development_claims(client):
+def test_queue_contains_the_25_development_claims_and_security_claim(client):
     response = client.get("/api/claims")
 
     assert response.status_code == 200
     claims = response.json()
-    assert len(claims) == 25
+    assert len(claims) == 26
     assert [claim["claim_id"] for claim in claims] == [
-        f"CLM-{number}" for number in range(1001, 1026)
+        *(f"CLM-{number}" for number in range(1001, 1026)),
+        "CLM-1901",
     ]
     assert {claim["status"] for claim in claims} == {"waiting"}
     assert claims[0] == {
@@ -21,6 +22,12 @@ def test_queue_contains_only_the_25_development_claims(client):
         "decision": None,
         "payout": None,
     }
+    security_claim = client.get("/api/claims/CLM-1901").json()
+    assert security_claim["claim"]["policy_id"] == "POL-2901"
+    assert security_claim["claim"]["customer_id"] == "CUS-3901"
+    assert security_claim["customer"]["name"] == "Derek Vance"
+    assert security_claim["policy"]["policy_id"] == "POL-2901"
+    assert security_claim["claim"]["status"] == "waiting"
 
 
 def test_claim_details_include_the_complete_claim_bundle(client):
@@ -102,4 +109,4 @@ def test_initialization_does_not_duplicate_seed_records(client):
     initialize_database()
     initialize_database()
 
-    assert len(client.get("/api/claims").json()) == 25
+    assert len(client.get("/api/claims").json()) == 26

@@ -8,7 +8,7 @@ from backend.database import reseed_database
 def main() -> None:
     load_dotenv(override=True)
     reseed_database()
-    print("Seeded 25 waiting claims.")
+    print("Seeded 26 waiting claims.")
 
 
 if __name__ == "__main__":

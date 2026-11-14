@@ -11,4 +11,6 @@
 - `e2e/`: Playwright with isolated SQLite business/checkpoint state and a JSON-capturing stand-in agent on port 8003. Automated tests never load `.env`, contact hosted services or call a model.
 - `data/`: approved business seed data plus the evaluation sources/labels used only by backend seeding and scoring. The claim agent never reads files or receives handler answers.
 
+The claim graph's first durable node screens the complete policy-plus-claim JSON using Lab 1's fixed instructions and reason-first `Screening` schema. It records raw usage on every structured-output attempt (at most three), refers flagged claims without invoking the claim model, and checkpoints passing results before ordinary work. Default screening uses Luna/`none`; a pinned one-model/default configuration omits reasoning effort. The check is not versioned or editable by the improver. Security seeding appends `CLM-1901`, its policy and customer but not its handler decision; backend label-driven evaluation selection excludes it.
+
 Python 3.12 with uv, all in the root `pyproject.toml`. Node 26. `npm run dev` starts backend, agent and dashboard with `.env`; `npm run seed` intentionally resets the selected database, including runs, evaluations and checkpoints. `uv run -m agent CLM-1001` works one named claim with no run; bare CLI queue execution is removed.

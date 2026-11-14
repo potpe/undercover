@@ -33,6 +33,7 @@ def test_named_run_schedules_only_that_claim(client, monkeypatch):
     bundle = client.get("/api/claims/CLM-1001").json()
     assert bundle["agent_thread_id"] == "thread-api"
     assert bundle["work_run_id"] is None
+    assert bundle["activity"] == []
 
 
 def test_duplicate_named_run_is_rejected_while_in_progress(client):

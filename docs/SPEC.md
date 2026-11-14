@@ -14,6 +14,7 @@ The UnderCover Agent works the queue the way a handler does. A dispatch covers e
 
 For each claim the graph should:
 
+- screen the complete customer-written claim for hidden instructions before the claim model sees it; refer flagged claims with zero payout, the check's reason and `Security check` as the section
 - read the claim, the customer's policy and claim history, and every supporting document
 - find and read the relevant sections of the policy wording and claims manual rather than receiving whole documents
 - approve, decline or refer the claim
@@ -22,11 +23,13 @@ For each claim the graph should:
 
 The graph records the decision and owns the payment step. An approval that needs no sign-off is paid immediately. An approval over the limit pauses with its work saved until a handler signs off; the agent then resumes the same thread and pays it. Sign-off is saved even if the agent is temporarily unavailable.
 
+The screening check is outside versioned claim-agent configuration and cannot be changed by the improver. It uses Luna at `none`, or the platform's pinned one-model configuration with no reasoning effort. Every attempt's reported usage counts toward the claim and run cost. An unreadable answer has at most three attempts; errors stop claim-model work and follow normal failure handling. Completed screening is saved, so a resumed thread is not checked again; a fresh attempt is.
+
 A rate limit or timeout waits and carries on from the latest saved step as the same attempt. If its retries run out, the claim stays in progress for the next dispatch. Any other failure returns the claim to the queue for one fresh retry in the same dispatch; a second failure leaves it for a handler. One bad claim does not stop the dispatch, and no claim is decided or paid twice.
 
 If the agent is stopped partway through, its dispatch or evaluation is marked stopped. The next dispatch carries on with the claims left in progress and the waiting queue, preserving each saved thread and attempt. A dispatch skips a claim already resuming after sign-off. Its summary comes from our records, not a model: decision counts, payouts waiting for sign-off, claims left for a handler and claims still in progress.
 
-Evaluations use fresh copies of either labelled set, whole or its five tiny claims, through the same dispatcher and claim graph. Copies never enter the queue or accept sign-off; a held approval counts as finished and its saved progress is cleared. The Scoreboard compares each copy with its handler decision and reports decision accuracy, payout accuracy, cost of mistakes, straight-through rate, model cost and active/whole-run time. An undecided copy counts as a referral.
+Evaluations use fresh copies of either labelled set, whole or its five tiny claims, through the same dispatcher and claim graph. Sources are selected through backend-held handler labels; the unlabelled security claim `CLM-1901` enters neither set. Copies never enter the queue or accept sign-off; a held approval counts as finished and its saved progress is cleared. The Scoreboard compares each copy with its handler decision and reports decision accuracy, payout accuracy, cost of mistakes, straight-through rate, model cost and active/whole-run time. An undecided copy counts as a referral.
 
 Our goal is to handle claims straight through, as accurately as our handlers do.
 
@@ -50,6 +53,8 @@ Our goal is to handle claims straight through, as accurately as our handlers do.
 ## Our records
 
 Everything is in `data/`, described in `data/README.md`: the claims queue, the policies, the customers, the plans, the handlers, the policy wording and the claims manual. The held-out claims in `data/evals/` are for checking the agent later and stay out of the queue.
+
+Seeding appends the security claim, policy and customer in `data/security/` to the original 25 operational claims. Its handler decision is not seeded, and `data/claims.json` stays unchanged.
 
 ## Not for now
 

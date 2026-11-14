@@ -371,7 +371,7 @@ def seed_documents(connection: Connection) -> None:
 def seed_business_data(connection: Connection) -> None:
     if connection.execute(select(func.count()).select_from(claims_table)).scalar_one():
         return
-    for source in load_json("claims.json"):
+    for source in load_json("claims.json") + load_json("security/claims.json"):
         claim = {**source, "status": "waiting"}
         connection.execute(
             insert(claims_table).values(
@@ -385,11 +385,11 @@ def seed_business_data(connection: Connection) -> None:
                 status="waiting",
             )
         )
-    for policy in load_json("policies.json"):
+    for policy in load_json("policies.json") + load_json("security/policies.json"):
         connection.execute(
             insert(policies_table).values(policy_id=policy["policy_id"], data=policy)
         )
-    for customer in load_json("customers.json"):
+    for customer in load_json("customers.json") + load_json("security/customers.json"):
         connection.execute(
             insert(customers_table).values(
                 customer_id=customer["customer_id"], data=customer

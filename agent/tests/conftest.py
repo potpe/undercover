@@ -1,11 +1,39 @@
 import pytest
 from fastapi import HTTPException
 from fastapi.testclient import TestClient
+from langchain_core.messages import AIMessage
 
+from agent import main as agent_main
 from backend import agent_service, auth, judge
 from backend.main import app
 
 TEST_AGENT_KEY = "undercover-e2e-agent-key-32-characters"
+
+
+class ScreenStructuredStub:
+    def invoke(self, messages):
+        return {
+            "raw": AIMessage(content=""),
+            "parsed": agent_main.Screening(
+                reason="No hidden instructions were found.",
+                instructions_found=False,
+            ),
+            "parsing_error": None,
+        }
+
+
+class ScreenModelStub:
+    def with_structured_output(self, schema, **kwargs):
+        assert schema is agent_main.Screening
+        assert kwargs == {"include_raw": True}
+        return ScreenStructuredStub()
+
+
+@pytest.fixture(autouse=True)
+def stub_claim_screen(monkeypatch):
+    monkeypatch.setattr(
+        agent_main, "screening_model", lambda _configuration: ScreenModelStub()
+    )
 
 
 @pytest.fixture

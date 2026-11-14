@@ -78,8 +78,45 @@ def test_seeding_stores_sources_and_labels_outside_the_queue(client):
         )
         == 5
     )
-    assert len(client.get("/api/claims").json()) == 25
+    assert len(client.get("/api/claims").json()) == 26
+    assert "CLM-1901" not in {label["claim_id"] for label in labels}
     assert client.get("/api/evaluations").json() == []
+
+
+@pytest.mark.parametrize("evaluation_set", ["evaluation", "held_out"])
+@pytest.mark.parametrize("tiny", [False, True])
+def test_evaluations_only_copy_labeled_sources(client, evaluation_set, tiny):
+    with connect() as connection:
+        labels = (
+            connection.execute(
+                select(handler_decisions_table).where(
+                    handler_decisions_table.c.evaluation_set == evaluation_set
+                )
+            )
+            .mappings()
+            .all()
+        )
+    expected_sources = {
+        label["claim_id"] for label in labels if not tiny or label["data"]["tiny"]
+    }
+    created = create_evaluation(client, evaluation_set, tiny)
+    assert created.status_code == 201
+    run = created.json()
+    with connect() as connection:
+        actual_sources = set(
+            connection.execute(
+                select(run_claims_table.c.source_claim_id).where(
+                    run_claims_table.c.run_id == run["run_id"]
+                )
+            )
+            .scalars()
+            .all()
+        )
+
+    assert actual_sources == expected_sources
+    assert "CLM-1901" not in actual_sources
+    assert len(actual_sources) == (5 if tiny else 25)
+    client.post("/api/internal/runs/stop-active")
 
 
 def test_evaluation_copies_have_new_ids_and_leave_queue_unchanged(client):

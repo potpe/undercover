@@ -2,7 +2,7 @@
 
 `uv sync` and `npm install` at the repo root install everything, including a git pre-commit hook. `npm run dev` starts the backend on port 8000, the agent service on port 8002 and the dashboard on port 5173, passing `.env` to the Python services. On the queue page, choose 1–25 agents at once (default 3) and start a dispatch; N limits concurrency, not the number of waiting/interrupted claims. On Scoreboard, choose the evaluation or held-out set, whole or five `tiny` claims, and N. Only one dispatch/evaluation runs at once. `uv run -m agent CLM-1001` works one named claim with no run; bare `uv run -m agent` is invalid.
 
-Stop the services before `npm run seed`, which intentionally resets the database selected by `DATABASE_URL` or `DATABASE_PATH`, including claims, runs, the scoreboard, ledgers and checkpoint state. It restores 25 waiting operational claims plus the separate held-out sources and handler labels. Normal startup never reseeds existing work. Evaluations create their own copies and need no reseed. Tests use isolated SQLite and stubs without loading `.env`; no Supabase, Langfuse or OpenRouter connection is needed.
+Stop the services before `npm run seed`, which intentionally resets the database selected by `DATABASE_URL` or `DATABASE_PATH`, including claims, runs, the scoreboard, ledgers and checkpoint state. It restores 26 waiting operational claims (the original 25 plus security claim `CLM-1901`) and the separate held-out sources and handler labels. The security handler decision is never seeded; evaluations still use only their original labelled sources. Normal startup never reseeds existing work. Evaluations create their own copies and need no reseed. Tests use isolated SQLite and stubs without loading `.env`; no Supabase, Langfuse or OpenRouter connection is needed.
 
 `npm run check` runs every check:
 
@@ -15,6 +15,8 @@ The pre-commit hook runs the format, lint, type and unit test checks on every co
 Set `UNDERCOVER_API_KEY` to a random value of at least 32 characters in `.env` for live agent work. Every agent-side backend request sends it in `X-API-Key`, including clients created after dotenv loads. The backend starts without it, but agent-only requests return 401 and the agent service refuses to start. Shared claim reads also accept a handler's bearer token; dashboard actions always require handler sign-in. The named-claim CLI uses a separate internal start operation and invokes the claim graph without impersonating a handler.
 
 Automated fixtures use a fixed, non-secret agent key and separate local handler tokens. Tests never read root `.env` or contact hosted Auth, models or AWS. Before the full offline gate, move root `.env` aside and restore it in a `finally` block.
+
+The first claim activity is the hidden-instruction check's result. Flagged claims become zero-payout referrals with the checker reason and `Security check` section. Each raw screening response contributes reported usage, including up to three structured-answer attempts. Saved claim progress does not repeat completed screening. Automated tests stub the checker independently of the claim model.
 
 ## Planning
 

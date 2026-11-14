@@ -197,7 +197,6 @@ def start_run(claim_id: str, thread_id: str | None = None) -> None:
                 work_run_id=None,
             )
         )
-        insert_activity(connection, claim_id, "Agent run started")
 
 
 def fail_run(claim_id: str, error: Exception) -> None:
