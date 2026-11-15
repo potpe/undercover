@@ -9,6 +9,7 @@ from langchain_core.messages import AIMessage
 from sqlalchemy import update
 
 from agent import api, direct, dispatcher, main, service, tools
+from agent.tests.helpers import calculate_approval
 from backend import main as backend_main
 from backend.database import claims_table, connect
 from backend.models import DecisionRequest, DispatchRequest, PaymentRequest
@@ -88,7 +89,8 @@ def create_dispatch(client, concurrency=3):
     return response.json()["run_id"]
 
 
-def approve(claim_id, payout=420):
+def approve(client, claim_id, payout=420):
+    calculate_approval(client, claim_id, payout)
     record_decision(
         claim_id,
         DecisionRequest(
@@ -97,7 +99,7 @@ def approve(claim_id, payout=420):
             reason=(
                 "The evidence supports approval and the backend calculated this payout."
             ),
-            policy_section="Section 3: Trip Delay; Section 10: Payment",
+            section="Section 3: Trip Delay; Section 10: Payment",
             decided_by="UnderCover Agent (configuration version 1)",
         ),
     )
@@ -188,7 +190,7 @@ def test_rate_limit_resumes_same_attempt_and_pays_once(client, monkeypatch):
         threads.append(thread_id)
         if len(threads) == 1:
             raise ModelRateLimitError("429")
-        approve(claim_id)
+        approve(client, claim_id)
         return f"{claim_id}: approve $420.00; payment recorded"
 
     monkeypatch.setattr(service, "claim_run", work)
@@ -224,7 +226,7 @@ def test_exhausted_rate_limit_stays_in_progress_for_next_dispatch(client, monkey
 
     def recovered(claim_id, thread_id, run_id, run_kind):
         assert thread_id == held["agent_thread_id"]
-        approve(claim_id)
+        approve(client, claim_id)
         return f"{claim_id}: approve $420.00; payment recorded"
 
     monkeypatch.setattr(service, "claim_run", recovered)
@@ -243,7 +245,7 @@ def test_ordinary_error_retries_fresh_once_then_succeeds(client, monkeypatch):
         threads.append(thread_id)
         if len(threads) == 1:
             raise RuntimeError("Invalid response")
-        approve(claim_id)
+        approve(client, claim_id)
         return f"{claim_id}: approve $420.00; payment recorded"
 
     monkeypatch.setattr(service, "claim_run", flaky)
@@ -269,7 +271,7 @@ def test_second_failure_leaves_one_claim_without_stopping_peer(client, monkeypat
                 decision="decline",
                 payout=0,
                 reason="The policy wording excludes this loss.",
-                policy_section="Section 9: General exclusions",
+                section="Section 9: General exclusions",
                 decided_by="UnderCover Agent (configuration version 1)",
             ),
         )
@@ -292,13 +294,14 @@ def test_second_failure_leaves_one_claim_without_stopping_peer(client, monkeypat
 
 def test_dispatch_skips_claim_already_resuming_after_signoff(client, monkeypatch):
     use_backend(monkeypatch)
+    calculate_approval(client, "CLM-1003", 3750)
     client.post(
         "/api/claims/CLM-1003/decision",
         json={
             "decision": "approve",
             "payout": 3750,
             "reason": "The injury is covered. The deductible produces this payout.",
-            "policy_section": "Section 7: Emergency Medical; Section 10: Payment",
+            "section": "Section 7: Emergency Medical; Section 10: Payment",
             "decided_by": "UnderCover Agent (configuration version 1)",
         },
     )
@@ -335,8 +338,34 @@ def test_signoff_resumes_held_claim_through_service_and_pays_once(client, monkey
 
         def __init__(self, _configuration=None):
             self.model_config = _configuration
+            self.calls = 0
 
         def invoke(self, messages):
+            self.calls += 1
+            if self.calls == 1:
+                return AIMessage(
+                    content="",
+                    tool_calls=[
+                        {
+                            "name": "calculate_payout",
+                            "args": {
+                                "benefit": "emergency_medical",
+                                "lines": [
+                                    {
+                                        "description": "Covered medical expense",
+                                        "amount": 3800,
+                                        "quantity": 1,
+                                        "kind": "expense",
+                                        "nights": 0,
+                                        "hours": 0,
+                                    }
+                                ],
+                                "paid_by_others": 0,
+                            },
+                            "id": "calculation",
+                        }
+                    ],
+                )
             return AIMessage(
                 content="",
                 tool_calls=[
@@ -349,7 +378,7 @@ def test_signoff_resumes_held_claim_through_service_and_pays_once(client, monkey
                                 "The injury is covered. The deductible produces "
                                 "this payout."
                             ),
-                            "policy_section": (
+                            "section": (
                                 "Section 7: Emergency Medical; Section 10: Payment"
                             ),
                         },

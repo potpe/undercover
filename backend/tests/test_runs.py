@@ -7,6 +7,7 @@ from sqlalchemy import update
 from backend import agent_service
 from backend.database import claims_table, connect
 from backend.models import DecisionKind, DecisionRequest, PaymentRequest
+from backend.tests.helpers import seed_working_calculation
 from backend.workflow import record_decision, record_payment
 
 
@@ -36,6 +37,8 @@ def complete(client, run_id, claim_id, result=None):
 
 
 def decide(claim_id, kind: DecisionKind = "approve", payout=420):
+    if kind == "approve":
+        seed_working_calculation(claim_id, payout)
     record_decision(
         claim_id,
         DecisionRequest(
@@ -44,7 +47,7 @@ def decide(claim_id, kind: DecisionKind = "approve", payout=420):
             reason=(
                 "The evidence supports this decision under the cited policy wording."
             ),
-            policy_section="Section 3: Trip Delay; Section 10: Payment",
+            section="Section 3: Trip Delay; Section 10: Payment",
             decided_by="UnderCover Agent",
         ),
     )

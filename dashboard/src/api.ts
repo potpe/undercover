@@ -102,7 +102,14 @@ export interface Decision {
   decision: DecisionKind;
   payout: number;
   reason: string;
-  policy_section: string;
+  section: string;
+  calculation: {
+    lines: { step: string; amount: number }[];
+    payout: number;
+  } | null;
+  decided_by: string;
+  decided_at: string;
+  manual_version: string;
 }
 
 export interface Activity {

@@ -5,6 +5,7 @@ from langchain_core.messages import AIMessage
 from sqlalchemy import update
 
 from agent import api, direct, dispatcher, main, service, tools
+from agent.tests.helpers import calculate_approval
 from backend import main as backend_main
 from backend.database import claims_table, connect
 from backend.models import DecisionRequest, PaymentRequest
@@ -39,7 +40,7 @@ def approval(payout=420):
         decision="approve",
         payout=payout,
         reason="The delay is covered. The backend calculation gives this payout.",
-        policy_section="Section 3: Trip Delay; Section 10: Payment",
+        section="Section 3: Trip Delay; Section 10: Payment",
         decided_by="UnderCover Agent (configuration version 1)",
     )
 
@@ -49,6 +50,27 @@ def decision_call(payout=420):
         "decision",
         "record_decision",
         approval(payout).model_dump(exclude={"decided_by"}),
+    )
+
+
+def calculation_call(payout=420, deductible=50):
+    return tool_call(
+        "calculation",
+        "calculate_payout",
+        {
+            "benefit": "emergency_medical",
+            "lines": [
+                {
+                    "description": "Covered medical expense",
+                    "amount": payout + deductible,
+                    "quantity": 1,
+                    "kind": "expense",
+                    "nights": 0,
+                    "hours": 0,
+                }
+            ],
+            "paid_by_others": 0,
+        },
     )
 
 
@@ -128,7 +150,7 @@ def test_interrupted_claim_resumes_same_step_thread_and_attempt(client, monkeypa
     assert stopped["failed_attempts"] == 0
     client.post("/api/internal/runs/stop-active")
 
-    resumed_model = StubModel([decision_call()])
+    resumed_model = StubModel([calculation_call(), decision_call()])
     monkeypatch.setattr(main, "model", lambda _configuration: resumed_model)
     next_id = create_one_claim_dispatch(client, "CLM-1001")
 
@@ -147,7 +169,7 @@ def test_interrupted_claim_resumes_same_step_thread_and_attempt(client, monkeypa
 def test_signoff_saved_while_agent_is_down_is_recovered(client, monkeypatch):
     use_backend(monkeypatch)
     run_id = create_one_claim_dispatch(client, "CLM-1003")
-    stub = StubModel([decision_call(3750)])
+    stub = StubModel([calculation_call(3750), decision_call(3750)])
     monkeypatch.setattr(main, "model", lambda _configuration: stub)
     assert service.execute_stored_run(run_id) == "completed"
 
@@ -178,6 +200,7 @@ def test_resume_failure_does_not_reopen_a_paid_claim(client, monkeypatch):
     use_backend(monkeypatch)
     run_id = create_one_claim_dispatch(client, "CLM-1001")
     started = client.post(f"/api/internal/runs/{run_id}/claims/CLM-1001/begin").json()
+    calculate_approval(client, "CLM-1001", 420)
     record_decision("CLM-1001", approval())
     record_payment("CLM-1001", PaymentRequest(amount=420))
     client.post(

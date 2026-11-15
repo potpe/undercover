@@ -89,7 +89,7 @@ def test_judging_handles_undecided_failed_and_graded_claims(client, monkeypatch)
                 "decision": "decline",
                 "payout": 0,
                 "reason": f"Not covered {index}",
-                "policy_section": "Section 9",
+                "section": "Section 9",
                 "decided_by": "UnderCover Agent",
             },
         )
@@ -128,7 +128,7 @@ def test_parallel_judge_calls_finish_together(client, monkeypatch):
                 "decision": "decline",
                 "payout": 0,
                 "reason": "Not covered",
-                "policy_section": "Section 9",
+                "section": "Section 9",
                 "decided_by": "UnderCover Agent",
             },
         )
@@ -176,7 +176,7 @@ def test_all_failed_judgments_have_no_average_and_are_not_retried(client, monkey
                 "decision": "decline",
                 "payout": 0,
                 "reason": "Not covered",
-                "policy_section": "Section 9",
+                "section": "Section 9",
                 "decided_by": "UnderCover Agent",
             },
         )

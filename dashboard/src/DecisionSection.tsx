@@ -55,7 +55,7 @@ export function DecisionSection({
       <p className="decision-reason">{decision.reason}</p>
       <p className="policy-citation">
         <strong>Policy section</strong>
-        {decision.policy_section}
+        {decision.section}
       </p>
       {bundle.evaluation_run_id === null &&
       bundle.claim.status === "waiting_for_sign_off" &&

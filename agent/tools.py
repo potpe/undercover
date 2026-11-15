@@ -81,9 +81,9 @@ class PayoutInput(StrictToolInput):
 
 class DecisionInput(StrictToolInput):
     decision: Literal["approve", "decline", "refer"]
-    payout: float = Field(ge=0)
+    payout: float
     reason: str
-    policy_section: str
+    section: str
 
 
 @dataclass(frozen=True, slots=True)
@@ -241,14 +241,14 @@ def route_tools(
         decision: Literal["approve", "decline", "refer"],
         payout: float,
         reason: str,
-        policy_section: str,
+        section: str,
     ) -> str:
         """Submit this claim's decision draft for backend validation."""
         payload = {
             "decision": decision,
             "payout": payout,
             "reason": reason,
-            "policy_section": policy_section,
+            "section": section,
         }
         result = call("record_decision", payload)
         if on_decision:

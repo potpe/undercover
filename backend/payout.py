@@ -6,7 +6,13 @@ from typing import Any
 from fastapi import HTTPException
 from sqlalchemy import select
 
-from backend.database import add_activity, connect, get_claim_bundle, settings_table
+from backend.database import (
+    add_activity,
+    claims_table,
+    connect,
+    get_claim_bundle,
+    settings_table,
+)
 from backend.models import (
     Benefit,
     CalculationStep,
@@ -142,6 +148,7 @@ def calculate_claim_payout(claim_id: str, request: PayoutRequest) -> PayoutRespo
     bundle = get_claim_bundle(claim_id)
     if bundle is None:
         raise HTTPException(status_code=404, detail="Claim not found")
+    calculation_attempt = bundle["failed_attempts"] + 1
     with connect() as connection:
         limit = approval_limit(connection)
         deductible_applies_to = connection.execute(
@@ -157,6 +164,34 @@ def calculate_claim_payout(claim_id: str, request: PayoutRequest) -> PayoutRespo
         request.paid_by_others,
         limit,
     )
+    with connect() as connection:
+        row = (
+            connection.execute(
+                select(claims_table)
+                .where(claims_table.c.claim_id == claim_id)
+                .with_for_update()
+            )
+            .mappings()
+            .first()
+        )
+        if row is None:
+            raise HTTPException(status_code=404, detail="Claim not found")
+        if row["failed_attempts"] + 1 != calculation_attempt:
+            raise HTTPException(
+                status_code=409,
+                detail="Claim attempt changed while payout was being calculated",
+            )
+        connection.execute(
+            claims_table.update()
+            .where(claims_table.c.claim_id == claim_id)
+            .values(
+                current_calculation_attempt=calculation_attempt,
+                current_calculation={
+                    "lines": [line.model_dump() for line in result.calculation],
+                    "payout": result.payout,
+                },
+            )
+        )
     requirement = (
         "sign-off required" if result.needs_sign_off else "sign-off not required"
     )

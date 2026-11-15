@@ -124,8 +124,18 @@ function makeBundle(
           payout: payout ?? 0,
           reason:
             "The delay is covered. The documented expenses total the payout.",
-          policy_section:
+          section:
             "Section 3: Trip Delay; Section 10: How we work out your payment",
+          calculation:
+            decisionKind === "approve"
+              ? {
+                  lines: [{ step: "Covered expenses", amount: payout ?? 0 }],
+                  payout: payout ?? 0,
+                }
+              : null,
+          decided_by: "UnderCover Agent (configuration version 1)",
+          decided_at: "2026-11-03T12:00:00Z",
+          manual_version: "2026.2",
         }
       : null,
     paid_amount: null,

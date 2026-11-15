@@ -12,6 +12,7 @@ from backend.database import (
 )
 from backend.evaluations import score_answer
 from backend.models import DecisionRequest
+from backend.tests.helpers import seed_working_calculation
 from backend.workflow import record_decision
 
 
@@ -42,13 +43,15 @@ def copy_id(client, run_id, source_id):
 
 
 def decide(claim_id, kind, payout):
+    if kind == "approve":
+        seed_working_calculation(claim_id, payout)
     record_decision(
         claim_id,
         DecisionRequest(
             decision=kind,
             payout=payout,
             reason="The agent's reason is grounded in the claim and policy wording.",
-            policy_section="Section 3: Trip Delay; Section 10: Payment",
+            section="Section 3: Trip Delay; Section 10: Payment",
             decided_by="UnderCover Agent",
         ),
     )

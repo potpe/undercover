@@ -17,6 +17,7 @@ from backend.auth import (
 )
 from backend.improvement_routes import router as improvement_router
 from backend.main import app
+from backend.tests.helpers import seed_working_calculation
 
 
 def signing_material():
@@ -302,13 +303,14 @@ def test_signed_in_handler_and_over_limit_permission(client):
     assert me.status_code == 200
     assert me.json()["name"] == "Dana Whitfield"
 
+    seed_working_calculation("CLM-1003", 3750)
     decided = client.post(
         "/api/claims/CLM-1003/decision",
         json={
             "decision": "approve",
             "payout": 3750,
             "reason": "Emergency treatment is covered by this policy.",
-            "policy_section": "Section 7; Section 10",
+            "section": "Section 7; Section 10",
             "decided_by": "UnderCover Agent",
         },
     )

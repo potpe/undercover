@@ -1,9 +1,13 @@
+from datetime import datetime
+
 import pytest
-from sqlalchemy import select
+from sqlalchemy import select, update
 from sqlalchemy.dialects import postgresql
 
+from backend import payout as payout_module
 from backend import workflow
 from backend.database import claims_table, connect, settings_table
+from backend.tests.helpers import seed_working_calculation
 
 
 def decide(
@@ -17,9 +21,11 @@ def decide(
         "decision": decision,
         "payout": payout,
         "reason": "The loss is covered. The policy wording supports this decision.",
-        "policy_section": "Section 3: Trip Delay",
+        "section": "Section 3: Trip Delay",
     }
     request["decided_by"] = decided_by
+    if decision == "approve":
+        seed_working_calculation(claim_id, payout)
     return client.post(
         f"/api/claims/{claim_id}/decision",
         json=request,
@@ -103,6 +109,8 @@ def test_declines_and_referrals_are_decided_without_payment(client, decision):
     assert response.status_code == 200
     assert response.json()["claim"]["status"] == "decided"
     assert response.json()["decision"]["decision"] == decision
+    assert response.json()["decision"]["calculation"] is None
+    assert response.json()["decision"]["manual_version"] == "2026.2"
     assert pay(client, amount=0.0).status_code == 422
 
 
@@ -455,8 +463,8 @@ def test_different_decision_or_payment_on_completed_claim_is_rejected(client):
 def test_nonzero_decline_is_rejected(client):
     response = decide(client, decision="decline", payout=10.0)
 
-    assert response.status_code == 409
-    assert response.json() == {"detail": "Declines and referrals must have zero payout"}
+    assert response.status_code == 422
+    assert "section 14" in str(response.json()).lower()
 
 
 def test_workflow_actions_add_ordered_activity_once(client):
@@ -495,3 +503,197 @@ def test_workflow_returns_404_for_unknown_claim(client):
         ).status_code
         == 404
     )
+
+
+@pytest.mark.parametrize(
+    ("change", "part"),
+    [
+        ({"reason": ""}, "reason"),
+        ({"reason": " \t"}, "reason"),
+        ({"section": ""}, "section"),
+        ({"section": " \t"}, "section"),
+        ({"decided_by": ""}, "decided_by"),
+        ({"decided_by": " \t"}, "decided_by"),
+        ({"payout": -1}, "payout"),
+        ({"payout": 0}, "payout"),
+        ({"decision": "decline", "payout": 1}, "payout"),
+        ({"decision": "refer", "payout": 1}, "payout"),
+        ({"decision": "refer", "payout": -1}, "payout"),
+    ],
+)
+def test_section_14_request_validation_precedes_claim_lookup(client, change, part):
+    request = {
+        "decision": "approve",
+        "payout": 420,
+        "reason": "Covered loss.",
+        "section": "Section 3",
+        "decided_by": "UnderCover Agent",
+        **change,
+    }
+    if request["decision"] != "approve" and request["payout"] < 0:
+        request["decision"] = "refer"
+    known = client.post("/api/claims/CLM-1001/decision", json=request)
+    unknown = client.post("/api/claims/CLM-9999/decision", json=request)
+
+    assert known.status_code == unknown.status_code == 422
+    assert known.json() == unknown.json()
+    assert "section 14" in str(known.json()).lower()
+    assert part in str(known.json()).lower()
+    assert client.get("/api/claims/CLM-1001").json()["decision"] is None
+
+
+def test_approval_requires_current_calculation_and_exact_payout(client):
+    request = {
+        "decision": "approve",
+        "payout": 420,
+        "reason": "Covered loss.",
+        "section": "Section 3",
+        "decided_by": "UnderCover Agent",
+    }
+    missing = client.post("/api/claims/CLM-1001/decision", json=request)
+    assert missing.status_code == 422
+    assert "section 14" in missing.json()["detail"].lower()
+    assert "calculation" in missing.json()["detail"].lower()
+
+    seed_working_calculation("CLM-1001", 419)
+    mismatch = client.post("/api/claims/CLM-1001/decision", json=request)
+    assert mismatch.status_code == 422
+    assert "section 14" in mismatch.json()["detail"].lower()
+    assert "payout" in mismatch.json()["detail"].lower()
+
+    seed_working_calculation("CLM-1001", 420)
+    response = client.post("/api/claims/CLM-1001/decision", json=request)
+    assert response.status_code == 200
+    decision = response.json()["decision"]
+    assert decision["calculation"] == {
+        "lines": [{"step": "Test payout", "amount": 420}],
+        "payout": 420,
+    }
+    assert decision["section"] == "Section 3"
+    assert decision["decided_by"] == "UnderCover Agent"
+    assert decision["manual_version"] == "2026.2"
+    decided_at = datetime.fromisoformat(decision["decided_at"])
+    assert decided_at.tzinfo is not None
+    offset = decided_at.utcoffset()
+    assert offset is not None
+    assert offset.total_seconds() == 0
+    assert "policy_section" not in decision
+
+
+def test_latest_calculation_is_authoritative_and_replay_is_immutable(client):
+    payout_request = {
+        "benefit": "trip_delay",
+        "lines": [
+            {
+                "description": "Hotel",
+                "amount": 150,
+                "kind": "hotel",
+                "quantity": 1,
+                "nights": 1,
+                "hours": 0,
+            }
+        ],
+        "paid_by_others": 0,
+    }
+    first = client.post("/api/claims/CLM-1001/payout", json=payout_request)
+    payout_request["lines"][0]["amount"] = 175
+    latest = client.post("/api/claims/CLM-1001/payout", json=payout_request)
+    assert first.status_code == latest.status_code == 200
+
+    request = {
+        "decision": "approve",
+        "payout": latest.json()["payout"],
+        "reason": "Covered hotel expense.",
+        "section": "Section 3",
+        "decided_by": "UnderCover Agent",
+    }
+    accepted = client.post("/api/claims/CLM-1001/decision", json=request)
+    snapshot = accepted.json()["decision"]
+    payout_request["lines"][0]["amount"] = 200
+    recalculated = client.post("/api/claims/CLM-1001/payout", json=payout_request)
+    assert recalculated.status_code == 200
+    replay = client.post("/api/claims/CLM-1001/decision", json=request)
+    assert replay.json()["decision"] == snapshot
+    assert snapshot["calculation"] == {
+        "lines": latest.json()["calculation"],
+        "payout": latest.json()["payout"],
+    }
+
+
+def test_attempt_advance_during_calculation_refuses_stale_result(client, monkeypatch):
+    calculate = payout_module.work_out_payout
+
+    def advance_attempt(*args, **kwargs):
+        result = calculate(*args, **kwargs)
+        with connect() as connection:
+            connection.execute(
+                update(claims_table)
+                .where(claims_table.c.claim_id == "CLM-1001")
+                .values(failed_attempts=1)
+            )
+        return result
+
+    monkeypatch.setattr(payout_module, "work_out_payout", advance_attempt)
+    payout_request = {
+        "benefit": "trip_delay",
+        "lines": [
+            {
+                "description": "Hotel",
+                "amount": 150,
+                "kind": "hotel",
+                "quantity": 1,
+                "nights": 1,
+                "hours": 0,
+            }
+        ],
+        "paid_by_others": 0,
+    }
+    response = client.post("/api/claims/CLM-1001/payout", json=payout_request)
+    assert response.status_code == 409
+    assert response.json()["detail"] == (
+        "Claim attempt changed while payout was being calculated"
+    )
+
+    with connect() as connection:
+        current = connection.execute(
+            select(
+                claims_table.c.current_calculation_attempt,
+                claims_table.c.current_calculation,
+            ).where(claims_table.c.claim_id == "CLM-1001")
+        ).one()
+    assert current.current_calculation_attempt is None
+    assert current.current_calculation is None
+    rejected = client.post(
+        "/api/claims/CLM-1001/decision",
+        json={
+            "decision": "approve",
+            "payout": response.json().get("payout", 150),
+            "reason": "Covered hotel expense.",
+            "section": "Section 3",
+            "decided_by": "UnderCover Agent",
+        },
+    )
+    assert rejected.status_code == 422
+    assert "current-attempt" in rejected.json()["detail"]
+
+
+def test_fresh_attempt_cannot_reuse_previous_attempt_calculation(client):
+    seed_working_calculation("CLM-1001", 420)
+    with connect() as connection:
+        connection.execute(
+            claims_table.update()
+            .where(claims_table.c.claim_id == "CLM-1001")
+            .values(failed_attempts=1)
+        )
+    response = client.post(
+        "/api/claims/CLM-1001/decision",
+        json={
+            "decision": "approve",
+            "payout": 420,
+            "reason": "Covered loss.",
+            "section": "Section 3",
+            "decided_by": "UnderCover Agent",
+        },
+    )
+    assert response.status_code == 422
+    assert "section 14" in response.json()["detail"].lower()

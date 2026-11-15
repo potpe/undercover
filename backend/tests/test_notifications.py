@@ -1,16 +1,18 @@
 import httpx
 
 from backend import agent_service
+from backend.tests.helpers import seed_working_calculation
 
 
 def test_signoff_pays_atomically_without_contacting_agent_service(client, monkeypatch):
+    seed_working_calculation("CLM-1003", 3750)
     decided = client.post(
         "/api/claims/CLM-1003/decision",
         json={
             "decision": "approve",
             "payout": 3750,
             "reason": "The injury is covered. The deductible produces this payout.",
-            "policy_section": "Section 7: Emergency Medical; Section 10: Payment",
+            "section": "Section 7: Emergency Medical; Section 10: Payment",
             "decided_by": "UnderCover Agent",
         },
     )

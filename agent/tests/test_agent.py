@@ -2,6 +2,7 @@ import json
 from copy import deepcopy
 from datetime import UTC, datetime
 from types import SimpleNamespace
+from typing import cast
 
 import pytest
 from fastapi.testclient import TestClient
@@ -14,6 +15,7 @@ from sqlalchemy import insert, update
 
 from agent import api, direct, gateway, main, tools
 from agent.claim_context import ClaimContext
+from agent.tests.helpers import calculate_approval
 from backend.database import (
     configuration_versions_table,
     connect,
@@ -140,8 +142,8 @@ class RecoveringGatewayModel:
                     {
                         "decision": "refer",
                         "payout": 0,
-                        "reason": "The first draft needs correction.",
-                        "policy_section": "Section 14",
+                        "reason": "",
+                        "section": "Section 14",
                     },
                 ),
                 tool_call(
@@ -151,7 +153,7 @@ class RecoveringGatewayModel:
                         "decision": "refer",
                         "payout": 0,
                         "reason": "The evidence does not resolve this claim.",
-                        "policy_section": "Section 14",
+                        "section": "Section 14",
                     },
                 ),
             ]
@@ -180,6 +182,7 @@ class RemoteDecisionTool:
         self.claim_bundle = claim_bundle
         self.refusal_kind = refusal_kind
         self.calls = []
+        self.accepted_decision = None
 
     async def ainvoke(self, call: ToolCall) -> ToolMessage:
         self.calls.append(call)
@@ -189,7 +192,11 @@ class RemoteDecisionTool:
             )
         if len(self.calls) == 1:
             return ToolMessage(
-                content="Application refused the draft.",
+                content=(
+                    "Claims manual section 14: reason must not be blank."
+                    if self.refusal_kind == "section14"
+                    else "Application refused the draft."
+                ),
                 status="error",
                 tool_call_id=call["id"],
                 name=call["name"],
@@ -201,6 +208,12 @@ class RemoteDecisionTool:
         accepted["decision"] = {
             key: value for key, value in arguments.items() if key != "claim_id"
         }
+        accepted["decision"].update(
+            calculation=None,
+            decided_at="2026-11-15T12:00:00+00:00",
+            manual_version="2026.2",
+        )
+        self.accepted_decision = accepted["decision"]
         return ToolMessage(
             content=[],
             artifact={"structured_content": accepted},
@@ -301,7 +314,7 @@ def decision(payout, kind: DecisionKind = "approve"):
             "The evidence supports this decision under the cited wording. "
             "The payout follows the backend calculation."
         ),
-        policy_section="Section 3: Trip Delay; Section 10: Payment",
+        section="Section 3: Trip Delay; Section 10: Payment",
         decided_by="UnderCover Agent (configuration version 1)",
     )
 
@@ -311,6 +324,18 @@ def decision_call(call_id, payout, kind: DecisionKind = "approve"):
         call_id,
         "record_decision",
         decision(payout, kind).model_dump(exclude={"decided_by"}),
+    )
+
+
+def calculation_call(call_id, payout, deductible=50):
+    return tool_call(
+        call_id,
+        "calculate_payout",
+        {
+            "benefit": "emergency_medical",
+            "lines": [expense("Covered medical expense", payout + deductible)],
+            "paid_by_others": 0,
+        },
     )
 
 
@@ -395,13 +420,14 @@ def test_payment_resume_after_gateway_hold_and_handler_payment(client, monkeypat
             .where(settings_table.c.key == "company")
             .values(data={**company, "payout_approval_limit": 5000})
         )
+    calculate_approval(client, claim_id, 3750)
     response = client.post(
         f"/api/claims/{claim_id}/decision",
         json={
             "decision": "approve",
             "payout": 3750,
             "reason": "The injury is covered and the payout is supported.",
-            "policy_section": "Section 7",
+            "section": "Section 7",
             "decided_by": "UnderCover Agent (configuration version 1)",
         },
     )
@@ -458,7 +484,7 @@ def payment_state(claim_id: str = "CLM-1001", payout: float = 100) -> main.Claim
         "decision": "approve",
         "payout": payout,
         "reason": "",
-        "policy_section": "",
+        "section": "",
         "claim_status": "in_progress",
         "approved_by": None,
         "result": "",
@@ -539,9 +565,12 @@ def test_flagged_screen_uses_lab_prompt_and_never_invokes_claim_model(
     bundle = client.get("/api/claims/CLM-1001").json()
     assert bundle["decision"]["decision"] == "refer"
     assert bundle["decision"]["reason"] == result.reason
-    assert bundle["decision"]["policy_section"] == "Security check"
+    assert bundle["decision"]["section"] == "Security check"
     assert bundle["decision"]["decided_by"] == "Security check"
     assert bundle["decision"]["payout"] == 0
+    assert bundle["decision"]["calculation"] is None
+    assert bundle["decision"]["manual_version"] == "2026.2"
+    assert bundle["decision"]["decided_at"].endswith("+00:00")
     assert bundle["activity"][0]["message"] == f"Security check: {result.reason}"
     usage = run_usage(run_id)
     assert usage["model_cost"] == 0.03
@@ -639,7 +668,7 @@ def test_refused_round_budget_prevents_screening_model_invocation(client, monkey
             "decision": None,
             "payout": 0.0,
             "reason": "",
-            "policy_section": "",
+            "section": "",
             "claim_status": "in_progress",
             "approved_by": None,
             "result": "",
@@ -813,6 +842,16 @@ def test_graph_approves_and_pays_a_small_claim(client, monkeypatch):
     bundle = client.get("/api/claims/CLM-1001").json()
     assert bundle["claim"]["status"] == "decided"
     assert bundle["decision"]["payout"] == 420.0
+    assert bundle["decision"]["section"] == (
+        "Section 3: Trip Delay; Section 10: Payment"
+    )
+    assert bundle["decision"]["calculation"]["payout"] == 420.0
+    assert bundle["decision"]["calculation"]["lines"]
+    assert bundle["decision"]["decided_by"] == (
+        "UnderCover Agent (configuration version 1)"
+    )
+    assert bundle["decision"]["decided_at"].endswith("+00:00")
+    assert bundle["decision"]["manual_version"] == "2026.2"
     assert bundle["paid_amount"] == 420.0
     messages = [entry["message"] for entry in bundle["activity"]]
     assert messages[0] == (
@@ -925,6 +964,8 @@ def test_graph_interrupts_and_resumes_an_over_limit_claim(client, monkeypatch):
     bundle = client.get("/api/claims/CLM-1003").json()
     assert bundle["claim"]["status"] == "waiting_for_sign_off"
     assert bundle["paid_amount"] is None
+    assert bundle["decision"]["calculation"]["payout"] == 3750.0
+    assert bundle["decision"]["manual_version"] == "2026.2"
     state = saved_state(stub_model(), "thread-held")
     assert "approval" in state.next
     assert state.interrupts[0].value["payout"] == 3750
@@ -1053,7 +1094,7 @@ def test_decision_tool_refusal_returns_to_model_for_corrected_draft(
                 "decision": "refer",
                 "payout": 0,
                 "reason": "",
-                "policy_section": "Section 14",
+                "section": "Section 14",
             },
         ),
         tool_call(
@@ -1063,20 +1104,27 @@ def test_decision_tool_refusal_returns_to_model_for_corrected_draft(
                 "decision": "refer",
                 "payout": 0,
                 "reason": "The evidence does not resolve this claim.",
-                "policy_section": "Section 14",
+                "section": "Section 14",
             },
         ),
     ]
-    monkeypatch.setattr(
-        main, "model", lambda _configuration: StubModel(messages=iter(drafts))
-    )
+    claim_model = StubModel(messages=iter(drafts))
+    monkeypatch.setattr(main, "model", lambda _configuration: claim_model)
 
     assert main.run("CLM-1001", "decision-refusal") == "CLM-1001: refer $0.00"
     bundle = client.get("/api/claims/CLM-1001").json()
     assert bundle["decision"]["decision"] == "refer"
     assert bundle["decision"]["reason"] == "The evidence does not resolve this claim."
+    assert bundle["decision"]["section"] == "Section 14"
     assert bundle["decision"]["decided_by"] == (
         "UnderCover Agent (configuration version 1)"
+    )
+    assert bundle["decision"]["calculation"] is None
+    assert bundle["decision"]["manual_version"] == "2026.2"
+    assert bundle["decision"]["decided_at"].endswith("+00:00")
+    assert any(
+        "App refusal:" in entry["message"] and "section 14" in entry["message"].lower()
+        for entry in bundle["activity"]
     )
     assert (
         sum(
@@ -1087,7 +1135,63 @@ def test_decision_tool_refusal_returns_to_model_for_corrected_draft(
     )
 
 
-@pytest.mark.parametrize("refusal_kind", ["gateway", "application"])
+def test_tools_node_uses_backend_canonical_accepted_decision():
+    accepted_decision = {
+        "decision": "refer",
+        "payout": 0.0,
+        "reason": "Canonical reason.",
+        "section": "Section 14",
+        "calculation": None,
+        "decided_by": "UnderCover Agent (configuration version 4)",
+        "decided_at": "2026-11-15T12:00:00+00:00",
+        "manual_version": "2026.2",
+    }
+    accepted: dict[str, object] = {}
+
+    class AcceptedToolNode:
+        def invoke(self, state):
+            accepted.update(
+                payload={
+                    "decision": "decline",
+                    "payout": 5,
+                    "reason": "Uncanonical draft.",
+                    "section": "draft section",
+                },
+                bundle={
+                    "claim": {"status": "decided"},
+                    "decision": accepted_decision,
+                },
+            )
+            return {"messages": state["messages"]}
+
+    state = {
+        "messages": [],
+        "claim_id": "CLM-1001",
+        "model_calls": 1,
+        "decision": None,
+        "payout": 0.0,
+        "reason": "",
+        "section": "",
+        "claim_status": "in_progress",
+        "approved_by": None,
+        "result": "",
+        "run_id": None,
+        "run_kind": "dispatch",
+        "screening_flagged": False,
+    }
+
+    result = main.make_tools_node(cast(main.ToolNode, AcceptedToolNode()), accepted)(
+        cast(main.ClaimState, state)
+    )
+
+    assert result["decision"] == "refer"
+    assert result["payout"] == 0.0
+    assert result["reason"] == "Canonical reason."
+    assert result["section"] == "Section 14"
+    assert result["result"] == "CLM-1001: refer $0.00"
+
+
+@pytest.mark.parametrize("refusal_kind", ["gateway", "application", "section14"])
 def test_gateway_decision_refusal_returns_to_model_for_correction(
     client, monkeypatch, refusal_kind
 ):
@@ -1137,6 +1241,8 @@ def test_gateway_decision_refusal_returns_to_model_for_correction(
     )
     assert refusal_message.status == "error"
     assert refusal_message.tool_call_id == "draft"
+    if refusal_kind == "section14":
+        assert "section 14" in str(refusal_message.content).lower()
     assert len(remote_decision.calls) == 2
     assert all(
         call["name"] == "undercover-app___record_decision"
@@ -1149,6 +1255,15 @@ def test_gateway_decision_refusal_returns_to_model_for_correction(
     assert remote_decision.calls[1]["args"]["reason"] == (
         "The evidence does not resolve this claim."
     )
+    assert remote_decision.calls[0]["args"]["reason"] == ""
+    assert remote_decision.calls[0]["args"]["section"] == "Section 14"
+    accepted = remote_decision.accepted_decision
+    assert accepted is not None
+    assert accepted["reason"] == "The evidence does not resolve this claim."
+    assert accepted["section"] == "Section 14"
+    assert accepted["decided_by"] == "UnderCover Agent (configuration version 1)"
+    assert accepted["calculation"] is None
+    assert accepted["manual_version"] == "2026.2"
     assert any(
         method == "GET" and url.endswith("/api/claims/CLM-1001")
         for method, url in backend_requests
@@ -1177,7 +1292,7 @@ def test_gateway_decision_refusal_returns_to_model_for_correction(
         == 1
     )
     assert not any(
-        ("Gateway refusal" if refusal_kind == "application" else "App refusal")
+        ("Gateway refusal" if refusal_kind != "gateway" else "App refusal")
         in entry["message"]
         for entry in client.get("/api/claims/CLM-1001").json()["activity"]
     )
@@ -1199,6 +1314,7 @@ def test_gateway_payment_refusal_holds_claim_until_idempotent_signoff(
             .where(settings_table.c.key == "company")
             .values(data={**company, "payout_approval_limit": 5000})
         )
+    calculate_approval(client, "CLM-1003", 3750)
 
     payment_calls = []
 
@@ -1331,7 +1447,13 @@ def test_resumed_model_usage_belongs_to_the_current_run(client, monkeypatch):
         main,
         "model",
         lambda _configuration: InterruptibleStub(
-            messages=iter([first_reply, ModelRateLimitError("429")])
+            messages=iter(
+                [
+                    first_reply,
+                    calculation_call("calculation", 420),
+                    ModelRateLimitError("429"),
+                ]
+            )
         ),
     )
     first_run = create_run(client)
@@ -1350,6 +1472,7 @@ def test_resumed_model_usage_belongs_to_the_current_run(client, monkeypatch):
         "model",
         lambda _configuration: StubModel(messages=iter([final_reply])),
     )
+    calculate_approval(client, "CLM-1001", 420)
     client.post("/api/internal/runs/stop-active")
     second_run = create_run(client)
     result = main.run_with_context("CLM-1001", "resume-usage", second_run, "dispatch")
@@ -1445,6 +1568,7 @@ def test_run_configuration_fetches_its_pinned_score_free_version(client, monkeyp
         )
 
     monkeypatch.setattr(main, "model", capture_model)
+    calculate_approval(client, "CLM-1002", 420)
     main.run_with_context("CLM-1002", "version-two-thread", second_run)
     assert selected_configurations[0]["version"] == 2
     assert selected_configurations[0]["model_name"] == "openai/gpt-6-luna"

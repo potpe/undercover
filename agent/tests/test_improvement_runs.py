@@ -41,7 +41,7 @@ def stub_claims(monkeypatch):
                 "decision": "decline",
                 "payout": 0,
                 "reason": "The policy excludes this loss.",
-                "policy_section": "Section 9",
+                "section": "Section 9",
                 "decided_by": "UnderCover Agent (configuration version 1)",
             },
         )
@@ -204,7 +204,7 @@ def test_running_evaluation_stops_at_budget_without_extra_claim_attempts(
                 "decision": "decline",
                 "payout": 0,
                 "reason": "Not covered",
-                "policy_section": "Section 9",
+                "section": "Section 9",
                 "decided_by": "UnderCover Agent (configuration version 1)",
             },
         )

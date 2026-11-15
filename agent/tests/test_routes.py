@@ -83,6 +83,7 @@ def test_claim_tools_are_scoped_and_decision_maker_is_injected(monkeypatch):
         "document": {"title": "Document", "type": "string"},
         "number": {"title": "Number", "type": "integer"},
     }
+    assert "minimum" not in schemas["record_decision"]["payout"]
     payout_tool = next(item for item in tool_list if item.name == "calculate_payout")
     payout_schema = payout_tool.args_schema
     assert is_pydantic_schema(payout_schema)
@@ -367,7 +368,7 @@ def test_context_injects_policy_and_customer_ids_for_gateway_tools(monkeypatch):
             "decision": "decline",
             "payout": 0,
             "reason": "Not covered.",
-            "policy_section": "Section 9",
+            "section": "Section 9",
         }
     )
     assert calls == [
@@ -377,7 +378,7 @@ def test_context_injects_policy_and_customer_ids_for_gateway_tools(monkeypatch):
             "decision": "decline",
             "payout": 0,
             "reason": "Not covered.",
-            "policy_section": "Section 9",
+            "section": "Section 9",
             "claim_id": "CLM-1002",
             "decided_by": "UnderCover Agent (configuration version 7)",
         },
@@ -399,7 +400,7 @@ def test_direct_route_injects_configured_decision_maker(monkeypatch):
             "decision": "decline",
             "payout": 0,
             "reason": "Not covered.",
-            "policy_section": "Section 9",
+            "section": "Section 9",
         }
     )
     assert captured == [
@@ -407,7 +408,7 @@ def test_direct_route_injects_configured_decision_maker(monkeypatch):
             "decision": "decline",
             "payout": 0,
             "reason": "Not covered.",
-            "policy_section": "Section 9",
+            "section": "Section 9",
             "decided_by": "UnderCover Agent (configuration version 1)",
         }
     ]
@@ -431,6 +432,20 @@ def test_context_rejects_untrusted_ids_in_all_tool_schemas(monkeypatch):
             assert "\n" not in selected_tool.description
 
 
+def test_decision_draft_schema_defers_section14_validation_to_backend():
+    draft = tools.DecisionInput.model_validate(
+        {
+            "decision": "approve",
+            "payout": -1,
+            "reason": "",
+            "section": "",
+        }
+    )
+    assert draft.payout == -1
+    assert draft.reason == ""
+    assert draft.section == ""
+
+
 def is_pydantic_schema(value: object) -> TypeGuard[type[BaseModel]]:
     return isinstance(value, type) and issubclass(value, BaseModel)
 
@@ -440,6 +455,7 @@ def streamable_test_server(claim_bundle: dict[str, Any]):
     refusal_enabled = [False]
     context_refusal_enabled = [False]
     decision_calls = []
+    calculation = {}
 
     @server.tool(name="undercover-app___get_claim", structured_output=True)
     def get_claim(claim_id: str) -> dict[str, Any]:
@@ -465,6 +481,10 @@ def streamable_test_server(claim_bundle: dict[str, Any]):
         lines: list[PayoutLine],
         paid_by_others: float,
     ) -> dict[str, Any]:
+        calculation.update(
+            lines=[{"step": line.description, "amount": line.amount} for line in lines],
+            payout=120.0,
+        )
         return {
             "claim_id": claim_id,
             "benefit": benefit,
@@ -481,7 +501,7 @@ def streamable_test_server(claim_bundle: dict[str, Any]):
                 "decision",
                 "payout",
                 "reason",
-                "policy_section",
+                "section",
                 "decided_by",
             )
         }
@@ -489,6 +509,11 @@ def streamable_test_server(claim_bundle: dict[str, Any]):
         claim_bundle["decision"] = {
             key: value for key, value in arguments.items() if key != "claim_id"
         }
+        claim_bundle["decision"].update(
+            calculation=calculation.copy(),
+            decided_at="2026-11-15T12:00:00+00:00",
+            manual_version="2026.2",
+        )
         claim_bundle["claim"]["status"] = "in_progress"
         return cast(
             dict[str, Any],
@@ -503,9 +528,7 @@ def streamable_test_server(claim_bundle: dict[str, Any]):
             ),
             Parameter("payout", Parameter.POSITIONAL_OR_KEYWORD, annotation=float),
             Parameter("reason", Parameter.POSITIONAL_OR_KEYWORD, annotation=str),
-            Parameter(
-                "policy_section", Parameter.POSITIONAL_OR_KEYWORD, annotation=str
-            ),
+            Parameter("section", Parameter.POSITIONAL_OR_KEYWORD, annotation=str),
             Parameter("decided_by", Parameter.POSITIONAL_OR_KEYWORD, annotation=str),
         ],
         return_annotation=dict[str, Any],
@@ -811,13 +834,13 @@ def assert_gateway_decision_tool(
 ) -> None:
     tool = gateway_tools["record_decision"]
     properties = tool_schema(tool)["properties"]
-    assert set(properties) == {"decision", "payout", "reason", "policy_section"}
+    assert set(properties) == {"decision", "payout", "reason", "section"}
     result = tool.invoke(
         {
             "decision": "approve",
             "payout": 120,
             "reason": "Covered by the policy.",
-            "policy_section": "Section 3",
+            "section": "Section 3",
         }
     )
     accepted_bundle = accepted_decisions[-1][1]
@@ -827,18 +850,22 @@ def assert_gateway_decision_tool(
     assert accepted_bundle["decision"]["decided_by"] == (
         "UnderCover Agent (configuration version 1)"
     )
+    assert accepted_bundle["decision"]["section"] == "Section 3"
+    assert accepted_bundle["decision"]["calculation"]["payout"] == 120
+    assert accepted_bundle["decision"]["decided_at"].endswith("+00:00")
+    assert accepted_bundle["decision"]["manual_version"] == "2026.2"
     assert accepted_decisions[-1][0] == {
         "decision": "approve",
         "payout": 120.0,
         "reason": "Covered by the policy.",
-        "policy_section": "Section 3",
+        "section": "Section 3",
     }
     assert decision_calls[-1] == {
         "claim_id": "CLM-1001",
         "decision": "approve",
         "payout": 120.0,
         "reason": "Covered by the policy.",
-        "policy_section": "Section 3",
+        "section": "Section 3",
         "decided_by": "UnderCover Agent (configuration version 1)",
     }
 

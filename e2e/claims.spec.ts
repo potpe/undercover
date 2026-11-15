@@ -1,6 +1,11 @@
 import { expect, test } from "@playwright/test";
 import { signIn } from "./auth";
-import { agentHeaders, handlerHeaders, mockClaimDocumentReads } from "./api";
+import {
+  agentHeaders,
+  handlerHeaders,
+  mockClaimDocumentReads,
+  recordApproval,
+} from "./api";
 
 test.beforeEach(async ({ page }) => {
   await signIn(page);
@@ -75,21 +80,14 @@ test("a decided claim shows its payout, reason, policy and activity", async ({
   page,
   request,
 }) => {
-  const decision = await request.post(
-    "http://127.0.0.1:8000/api/claims/CLM-1002/decision",
-    {
-      data: {
-        decision: "approve",
-        payout: 650,
-        decided_by: "Test handler",
-        reason:
-          "The lost baggage is covered by the policy. Eligible items less carrier compensation produce a $650.00 payout.",
-        policy_section:
-          "Section 5: Baggage and Personal Effects; Section 10: How we work out your payment",
-      },
-      headers: agentHeaders,
-    },
-  );
+  const decision = await recordApproval(request, {
+    claimId: "CLM-1002",
+    payout: 650,
+    reason:
+      "The lost baggage is covered by the policy. Eligible items less carrier compensation produce a $650.00 payout.",
+    section:
+      "Section 5: Baggage and Personal Effects; Section 10: How we work out your payment",
+  });
   expect(decision.ok()).toBe(true);
   const payment = await request.post(
     "http://127.0.0.1:8000/api/claims/CLM-1002/payment",
@@ -127,21 +125,14 @@ test("handler sign-off pays immediately without resuming the agent service", asy
   page,
   request,
 }) => {
-  const decision = await request.post(
-    "http://127.0.0.1:8000/api/claims/CLM-1003/decision",
-    {
-      data: {
-        decision: "approve",
-        payout: 3750,
-        decided_by: "Test handler",
-        reason:
-          "The sudden wrist fracture required emergency treatment during the covered trip. The $3,800.00 bill less the $50.00 Premium deductible gives a $3,750.00 payout.",
-        policy_section:
-          "Section 7: Emergency Medical; Section 10: How we work out your payment",
-      },
-      headers: agentHeaders,
-    },
-  );
+  const decision = await recordApproval(request, {
+    claimId: "CLM-1003",
+    payout: 3750,
+    reason:
+      "The sudden wrist fracture required emergency treatment during the covered trip. The $3,800.00 bill less the $50.00 Premium deductible gives a $3,750.00 payout.",
+    section:
+      "Section 7: Emergency Medical; Section 10: How we work out your payment",
+  });
   expect(decision.ok()).toBe(true);
   const blocked = await request.post(
     "http://127.0.0.1:8000/api/claims/CLM-1003/payment",
@@ -426,19 +417,12 @@ test("the scoreboard shows an API-played evaluation and linked copy", async ({
     claim_comparisons: { claim_id: string }[];
   };
   const copyId = evaluation.claim_comparisons[0].claim_id;
-  const decision = await request.post(
-    `http://127.0.0.1:8000/api/claims/${copyId}/decision`,
-    {
-      data: {
-        decision: "approve",
-        payout: 3750,
-        decided_by: "Test handler",
-        reason: "The test plays a held approval for the evaluation copy.",
-        policy_section: "Section 7: Emergency Medical; Section 10: Payment",
-      },
-      headers: agentHeaders,
-    },
-  );
+  const decision = await recordApproval(request, {
+    claimId: copyId,
+    payout: 3750,
+    reason: "The test plays a held approval for the evaluation copy.",
+    section: "Section 7: Emergency Medical; Section 10: Payment",
+  });
   expect(decision.ok()).toBe(true);
   await request.post(
     `http://127.0.0.1:8000/api/internal/runs/${String(run.run_id)}/claims/${copyId}/complete`,

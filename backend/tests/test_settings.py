@@ -2,6 +2,8 @@ from datetime import datetime
 
 import pytest
 
+from backend.tests.helpers import seed_working_calculation
+
 
 def settings_payload(**changes):
     settings = {
@@ -27,13 +29,14 @@ def settings_payload(**changes):
 
 
 def decide(client, payout):
+    seed_working_calculation("CLM-1001", payout)
     return client.post(
         "/api/claims/CLM-1001/decision",
         json={
             "decision": "approve",
             "payout": payout,
             "reason": "The covered expenses support this approval.",
-            "policy_section": "Section 3; Section 10",
+            "section": "Section 3; Section 10",
             "decided_by": "UnderCover Agent",
         },
     )
@@ -68,13 +71,14 @@ def test_settings_change_records_handler_and_applies_to_next_decision(client):
     blocked = client.post("/api/claims/CLM-1001/payment", json={"amount": 1500})
     assert blocked.status_code == 409
 
+    seed_working_calculation("CLM-1002", 1500)
     client.post(
         "/api/claims/CLM-1002/decision",
         json={
             "decision": "approve",
             "payout": 1500,
             "reason": "The covered expenses support this approval.",
-            "policy_section": "Section 3; Section 10",
+            "section": "Section 3; Section 10",
             "decided_by": "UnderCover Agent",
         },
     )

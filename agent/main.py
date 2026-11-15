@@ -68,7 +68,7 @@ class ClaimState(TypedDict):
     decision: DecisionKind | None
     payout: float
     reason: str
-    policy_section: str
+    section: str
     claim_status: str
     approved_by: str | None
     result: str
@@ -236,7 +236,7 @@ def screen_claim(
                 decision="refer",
                 payout=0,
                 reason=result.reason,
-                policy_section="Security check",
+                section="Security check",
                 decided_by="Security check",
             ),
         )
@@ -245,7 +245,7 @@ def screen_claim(
             "decision": "refer",
             "payout": 0.0,
             "reason": result.reason,
-            "policy_section": "Security check",
+            "section": "Security check",
             "claim_status": bundle["claim"]["status"],
             "result": f"{state['claim_id']}: refer $0.00",
         }
@@ -322,20 +322,20 @@ def make_tools_node(tool_node: ToolNode, accepted: dict[str, Any]):
         result = tool_node.invoke(state)
         if not accepted:
             return result
-        payload = accepted["payload"]
         bundle = accepted["bundle"]
+        decision = bundle["decision"]
         status = bundle["claim"]["status"]
         summary = (
-            f"{state['claim_id']}: {payload['decision']} ${payload['payout']:,.2f}"
+            f"{state['claim_id']}: {decision['decision']} ${decision['payout']:,.2f}"
         )
         if status == "waiting_for_sign_off":
             summary += "; waiting for sign-off"
         return {
             **result,
-            "decision": payload["decision"],
-            "payout": payload["payout"],
-            "reason": payload["reason"],
-            "policy_section": payload["policy_section"],
+            "decision": decision["decision"],
+            "payout": decision["payout"],
+            "reason": decision["reason"],
+            "section": decision["section"],
             "claim_status": status,
             "result": summary,
         }
@@ -549,7 +549,7 @@ def run_with_context(
                 "decision": None,
                 "payout": 0.0,
                 "reason": "",
-                "policy_section": "",
+                "section": "",
                 "claim_status": "in_progress",
                 "approved_by": None,
                 "result": "",

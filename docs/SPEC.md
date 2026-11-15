@@ -22,6 +22,14 @@ The read-only context service is an independent MCP service. Its seven data-gove
 
 The service's read-only tools are `lookup_term`, `describe_fields`, `get_plan`, `get_claim_rules`, `search_reference_data`, `search_documents` and `read_section`. They return the matching definitions, plan/rule/reference answers, or document sections with source provenance. An unknown term returns the glossary's known terms. Missing sections and invalid inputs are refusals rather than empty successful answers.
 
+## Decision records
+
+An accepted decision is a complete, immutable record. It contains the decision, USD `payout`, `section`, plain-language `reason`, required `decided_by`, UTC `decided_at` and `manual_version` from the backend documents table (currently `2026.2`). An approval also stores `calculation` as `{ "lines": [{ "step": "...", "amount": 0.00 }], "payout": 0.00 }`; its payout must exactly match the calculation payout. Declines and referrals have zero payout and no calculation. The agent supplies `UnderCover Agent (configuration version N)` as maker; the hidden-instruction screening referral supplies `Security check`.
+
+`calculate_payout` keeps the latest working calculation for the claim's current attempt, identified by `failed_attempts + 1`. A later calculation in that attempt replaces the earlier working calculation. Transient resume stays in the same attempt; an ordinary failure/new thread starts a fresh attempt. Only an accepted approval copies its exact calculation into the immutable decision record; declines and referrals never do.
+
+The backend validates section 14 before accepting a record. Blank/whitespace reason, section or maker, a non-positive approval payout, a negative payout, and a nonzero decline/referral payout receive a custom 422 naming section 14. An approval also requires a calculation for the current attempt and an exact payout match; a missing, stale or mismatched calculation is refused with a specific section 14 error. A refused draft is not recorded: the tool returns the refusal to the model so it can correct and retry. An identical accepted decision replay returns the existing record unchanged, including maker, decision time and manual version.
+
 For each claim the graph should:
 
 - screen the complete customer-written claim for hidden instructions before the claim model sees it; refer flagged claims with zero payout, the check's reason and `Security check` as the section
@@ -61,6 +69,8 @@ Our goal is to handle claims straight through, as accurately as our handlers do.
 - Amounts are in US dollars.
 
 The generated `/api/agent/openapi.json` document contains exactly `get_claim`, `get_policy`, `get_claim_history`, `calculate_payout`, `record_decision` and `pay_claim`. Document search and section reads belong to the context service, not the app API. The API document accepts the key or handler sign-in, has no deployment address or key tool input, and excludes handler actions, runs, evaluations and improvement. The Gateway-refusal hold operation is also excluded. In the agent's model surface, `pay_claim` is a graph operation, not a model tool.
+
+Judge and evaluation reads use the decision record's `section` field. Their existing scoring behavior is unchanged.
 
 The backend can serve the built dashboard and API at one address as an ordinary web server or through a Lambda handler. Lambda invocation does not run startup seeding or write local files; Supabase holds the existing records. Laptop development remains supported, and this build creates no cloud resources.
 

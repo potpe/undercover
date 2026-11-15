@@ -6,6 +6,7 @@ from sqlalchemy import Connection, RowMapping, select, update
 from backend.database import (
     claims_table,
     connect,
+    documents_table,
     handlers_table,
     insert_activity,
     settings_table,
@@ -59,7 +60,7 @@ def same_decision(row: RowMapping, request: DecisionRequest) -> bool:
         row["decision"] == request.decision
         and float(row["payout"]) == request.payout
         and row["reason"] == request.reason
-        and row["policy_section"] == request.policy_section
+        and row["policy_section"] == request.section
         and row["decided_by"] == request.decided_by
     )
 
@@ -71,12 +72,35 @@ def record_decision(claim_id: str, request: DecisionRequest) -> None:
             if same_decision(row, request):
                 return
             reject(connection, claim_id, "Claim already has a decision")
-        if request.decision != "approve" and request.payout != 0:
-            reject(
-                connection,
-                claim_id,
-                "Declines and referrals must have zero payout",
+        calculation = None
+        manual_version = connection.execute(
+            select(documents_table.c.version).where(
+                documents_table.c.document == "claims_manual"
             )
+        ).scalar_one()
+        decided_at = timestamp()
+        if request.decision == "approve":
+            current_attempt = row["failed_attempts"] + 1
+            calculation = row["current_calculation"]
+            if (
+                calculation is None
+                or row["current_calculation_attempt"] != current_attempt
+            ):
+                raise HTTPException(
+                    status_code=422,
+                    detail=(
+                        "Claims manual section 14: approval requires a current-attempt "
+                        "payout calculation"
+                    ),
+                )
+            if float(calculation["payout"]) != request.payout:
+                raise HTTPException(
+                    status_code=422,
+                    detail=(
+                        "Claims manual section 14: approval payout must match the "
+                        "current payout calculation"
+                    ),
+                )
         current_limit = approval_limit(connection)
         needs_sign_off = (
             request.decision == "approve" and request.payout > current_limit
@@ -92,8 +116,11 @@ def record_decision(claim_id: str, request: DecisionRequest) -> None:
                 decision=request.decision,
                 payout=request.payout,
                 reason=request.reason,
-                policy_section=request.policy_section,
+                policy_section=request.section,
                 decided_by=request.decided_by,
+                decision_calculation=calculation,
+                decided_at=decided_at,
+                manual_version=manual_version,
                 status=status,
                 sign_off_required=needs_sign_off,
                 approval_limit=current_limit,

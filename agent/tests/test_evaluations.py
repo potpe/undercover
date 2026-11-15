@@ -3,6 +3,7 @@ from fastapi.testclient import TestClient
 from langchain_core.messages import AIMessage
 
 from agent import api, direct, dispatcher, main, service, tools
+from agent.tests.helpers import calculate_approval
 from backend import main as backend_main
 from backend.models import DecisionRequest
 from backend.workflow import record_decision
@@ -25,7 +26,7 @@ class StubModel:
                         "decision": "approve",
                         "payout": self.payout,
                         "reason": "The evidence supports approval under the policy.",
-                        "policy_section": "Section 3: Trip Delay; Section 10: Payment",
+                        "section": "Section 3: Trip Delay; Section 10: Payment",
                     },
                     "id": "decision",
                 }
@@ -86,6 +87,9 @@ def test_evaluation_uses_claim_graph_without_changing_queue_or_retaining_progres
         },
     )
     run_id = created.json()["run_id"]
+    for claim in client.get(f"/api/internal/runs/{run_id}").json()["claims"]:
+        if payout in (420, 3750):
+            calculate_approval(client, claim["claim_id"], payout)
 
     assert service.execute_stored_run(run_id) == "completed"
 
@@ -161,13 +165,14 @@ def test_terminal_evaluation_error_also_clears_saved_progress(client, monkeypatc
 
     def error_after_held(claim_id, thread_id, run_id, run_kind):
         if claim_id == first_copy:
+            calculate_approval(client, claim_id, 3750)
             record_decision(
                 claim_id,
                 DecisionRequest(
                     decision="approve",
                     payout=3750,
                     reason="The held decision was saved before the response was lost.",
-                    policy_section="Section 7: Emergency Medical; Section 10: Payment",
+                    section="Section 7: Emergency Medical; Section 10: Payment",
                     decided_by="UnderCover Agent (configuration version 1)",
                 ),
             )
@@ -178,7 +183,7 @@ def test_terminal_evaluation_error_also_clears_saved_progress(client, monkeypatc
                 decision="decline",
                 payout=0,
                 reason="The policy wording excludes this loss.",
-                policy_section="Section 9: General exclusions",
+                section="Section 9: General exclusions",
                 decided_by="UnderCover Agent (configuration version 1)",
             ),
         )

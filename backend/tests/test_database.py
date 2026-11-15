@@ -23,7 +23,7 @@ def test_reseed_restores_the_queue_and_clears_all_work(client):
             "decision": "decline",
             "payout": 0,
             "reason": "The wording excludes this loss. The cited section applies.",
-            "policy_section": "Section 9: General exclusions",
+            "section": "Section 9: General exclusions",
             "decided_by": "UnderCover Agent",
         },
     )
@@ -61,7 +61,7 @@ def test_normal_initialization_preserves_existing_work(client):
             "decision": "decline",
             "payout": 0,
             "reason": "The wording excludes this loss. The cited section applies.",
-            "policy_section": "Section 9: General exclusions",
+            "section": "Section 9: General exclusions",
             "decided_by": "UnderCover Agent",
         },
     )

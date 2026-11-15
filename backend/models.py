@@ -1,8 +1,10 @@
+from __future__ import annotations
+
 from collections.abc import Sequence
 from datetime import datetime
 from typing import Any, Literal
 
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, Field, field_validator, model_validator
 
 ClaimStatus = Literal[
     "waiting", "in_progress", "waiting_for_sign_off", "decided", "left_for_handler"
@@ -42,6 +44,11 @@ class CalculationStep(BaseModel):
     amount: float
 
 
+class DecisionCalculation(BaseModel):
+    lines: list[CalculationStep]
+    payout: float
+
+
 class PayoutResponse(BaseModel):
     calculation: list[CalculationStep]
     payout: float
@@ -63,16 +70,42 @@ class Decision(BaseModel):
     decision: DecisionKind
     payout: float
     reason: str
-    policy_section: str
+    section: str
+    calculation: DecisionCalculation | None
     decided_by: str
+    decided_at: str
+    manual_version: str
 
 
 class DecisionRequest(BaseModel):
     decision: DecisionKind
-    payout: float = Field(ge=0)
-    reason: str = Field(min_length=1)
-    policy_section: str = Field(min_length=1)
+    payout: float
+    reason: str
+    section: str
     decided_by: str
+
+    @field_validator("reason", "section", "decided_by")
+    @classmethod
+    def fields_must_not_be_blank(cls, value: str, info: Any) -> str:
+        if not value.strip():
+            raise ValueError(
+                f"Claims manual section 14: {info.field_name} must not be blank"
+            )
+        return value.strip()
+
+    @model_validator(mode="after")
+    def payout_must_match_decision(self) -> DecisionRequest:
+        if self.payout < 0:
+            raise ValueError("Claims manual section 14: payout must not be negative")
+        if self.decision == "approve" and self.payout == 0:
+            raise ValueError(
+                "Claims manual section 14: approval payout must be greater than zero"
+            )
+        if self.decision != "approve" and self.payout != 0:
+            raise ValueError(
+                "Claims manual section 14: decline and referral payout must be zero"
+            )
+        return self
 
 
 class PaymentRequest(BaseModel):
