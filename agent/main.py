@@ -14,6 +14,7 @@ from langgraph.checkpoint.base import BaseCheckpointSaver
 from langgraph.graph import END, START, StateGraph
 from langgraph.graph.message import add_messages
 from langgraph.prebuilt import ToolNode
+from langgraph.store.base import BaseStore
 from langgraph.types import Command, interrupt
 from mcp.shared.exceptions import McpError
 from pydantic import BaseModel, Field, SecretStr
@@ -22,6 +23,7 @@ from agent import api as agent_api
 from agent.checkpoints import claim_checkpointer
 from agent.claim_context import ClaimContext
 from agent.gateway import pay_gateway
+from agent.memory import build_memory_store, save_claim_memory
 from agent.tools import canonical_security_claim, route_tools
 from agent.tracing import trace_claim
 from backend.models import (
@@ -288,6 +290,20 @@ def route_after_tool_node(state: ClaimState) -> str:
     return route_after_tools(state)
 
 
+def route_after_tool_node_with_memory(state: ClaimState, memory_enabled: bool) -> str:
+    if (
+        memory_enabled
+        and state.get("decision") is not None
+        and state["section"] != "Security check"
+    ):
+        return "save_memory"
+    return route_after_tool_node(state)
+
+
+def route_after_memory_save(state: ClaimState) -> str:
+    return route_after_decision(state)
+
+
 def make_screen_node(checker: Any, structured_checker: Any):
     def screen(state: ClaimState) -> dict[str, Any]:
         return screen_claim(state, checker, structured_checker)
@@ -408,6 +424,15 @@ def make_payment_node(gateway_enabled: bool):
     return pay
 
 
+def make_memory_save_node(memory_store: BaseStore, claim_context: ClaimContext):
+    def save(state: ClaimState) -> dict[str, Any]:
+        bundle = current_bundle(state["claim_id"])
+        save_claim_memory(memory_store, claim_context, bundle)
+        return {}
+
+    return save
+
+
 def build_claim_graph(
     selected_model: Any,
     instructions: str,
@@ -422,10 +447,12 @@ def build_claim_graph(
         accepted.update(payload=payload, bundle=bundle)
 
     gateway_enabled = bool(os.getenv("UNDERCOVER_GATEWAY_URL"))
+    memory_store = build_memory_store(claim_context)
     model_tools = route_tools(
         claim_context,
         "gateway" if gateway_enabled else "direct",
         on_decision=decision_accepted,
+        memory_store=memory_store,
     )
     model_with_tools = selected_model.bind_tools(model_tools)
     structured_checker = checker.with_structured_output(Screening, include_raw=True)
@@ -442,17 +469,35 @@ def build_claim_graph(
     builder.add_node("tools", tools)
     builder.add_node("approval", approval)
     builder.add_node("pay", pay)
+    if memory_store is not None:
+        builder.add_node(
+            "save_memory", make_memory_save_node(memory_store, claim_context)
+        )
     builder.add_conditional_edges("screen", route_after_screen, ["agent", END])
     builder.add_edge(START, "screen")
     builder.add_conditional_edges("agent", route_after_agent, ["tools", END])
     builder.add_conditional_edges(
         "tools",
-        route_after_tool_node,
-        ["approval", "pay", "agent", END],
+        lambda state: route_after_tool_node_with_memory(
+            state, memory_store is not None
+        ),
+        [
+            *(["save_memory"] if memory_store is not None else []),
+            "approval",
+            "pay",
+            "agent",
+            END,
+        ],
     )
+    if memory_store is not None:
+        builder.add_conditional_edges(
+            "save_memory",
+            route_after_memory_save,
+            ["approval", "pay", END],
+        )
     builder.add_edge("approval", END)
     builder.add_conditional_edges("pay", route_after_payment, ["approval", END])
-    return builder.compile(checkpointer=checkpointer)
+    return builder.compile(checkpointer=checkpointer, store=memory_store)
 
 
 def current_bundle(claim_id: str) -> dict[str, Any]:

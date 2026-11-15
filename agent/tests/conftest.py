@@ -46,6 +46,7 @@ def client(tmp_path, monkeypatch):
         "LANGFUSE_BASE_URL",
         "OPENROUTER_API_KEY",
         "MODEL_NAME",
+        "UNDERCOVER_MEMORY_ID",
     ):
         monkeypatch.delenv(key, raising=False)
 

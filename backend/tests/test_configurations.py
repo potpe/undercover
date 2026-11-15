@@ -100,6 +100,12 @@ def test_effective_instructions_append_database_documents_to_pinned_versions(
     assert version_one.startswith(
         Path("backend/agent_instructions.md").read_text().rstrip()
     )
+    assert "optional `search_memory` tool" in version_one
+    assert "this customer's earlier claims" in version_one
+    assert (
+        "backend claim history from `get_claim_history` is authoritative" in version_one
+    )
+    assert "section 9 repeat-claim decisions" in version_one
     assert version_two.startswith("Pinned version two instructions.")
     assert current == version_one
     assert handler_view == version_one

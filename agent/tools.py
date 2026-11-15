@@ -6,6 +6,7 @@ from dataclasses import dataclass
 from typing import Any, Literal
 
 from langchain_core.tools import BaseTool, StructuredTool, ToolException
+from langgraph.store.base import BaseStore
 from mcp.shared.exceptions import McpError
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -17,6 +18,7 @@ from agent.gateway import (
     invoke_gateway_tool,
     is_gateway_tool_refusal,
 )
+from agent.memory import search_customer_memory
 from backend.models import Benefit, PayoutLine
 
 APP_TOOL_PREFIX = "undercover-app___"
@@ -69,6 +71,10 @@ class PlanInput(StrictToolInput):
     plan: str
 
 
+class MemoryInput(StrictToolInput):
+    query: str
+
+
 class StrictPayoutLine(PayoutLine):
     model_config = ConfigDict(extra="forbid")
 
@@ -92,8 +98,15 @@ class ModelToolRoute:
     direct: DirectRoute
     selected_gateway: bool
     remote: dict[str, Any]
+    memory_store: BaseStore | None
 
     def invoke(self, name: str, arguments: dict[str, Any]) -> Any:
+        if name == "search_memory":
+            if self.memory_store is None:
+                raise RuntimeError("Memory search is unavailable for this claim")
+            return search_customer_memory(
+                self.memory_store, self.claim_context, arguments["query"]
+            )
         if name in CONTEXT_OPERATIONS:
             return self.invoke_context(name, arguments)
         if not self.selected_gateway:
@@ -225,6 +238,7 @@ def route_tools(
     claim_context: ClaimContext,
     selected: str = "direct",
     on_decision: Callable[[dict[str, Any], dict[str, Any]], None] | None = None,
+    memory_store: BaseStore | None = None,
 ) -> list[BaseTool]:
     """Build the same identifier-free tool surface for one claim."""
     route = ModelToolRoute(
@@ -232,6 +246,7 @@ def route_tools(
         direct=DirectRoute(claim_context),
         selected_gateway=selected == "gateway",
         remote=_gateway_tools_by_operation() if selected == "gateway" else {},
+        memory_store=memory_store,
     )
 
     def call(name: str, arguments: dict[str, Any]) -> Any:
@@ -273,7 +288,7 @@ def route_tools(
     def context_call(operation: str, **arguments: Any) -> Any:
         return call(operation, arguments)
 
-    return [
+    model_tools: list[BaseTool] = [
         StructuredTool.from_function(
             name="get_claim",
             description="Read the complete claim bundle for the claim being handled.",
@@ -349,6 +364,18 @@ def route_tools(
             args_schema=SectionInput,
         ),
     ]
+    if memory_store is not None and claim_context.run_kind != "evaluation":
+        model_tools.append(
+            StructuredTool.from_function(
+                name="search_memory",
+                description=(
+                    "Search this customer's prior claim summaries and useful facts."
+                ),
+                func=lambda query: call("search_memory", {"query": query}),
+                args_schema=MemoryInput,
+            )
+        )
+    return model_tools
 
 
 def canonical_security_claim(bundle: dict[str, Any]) -> str:
