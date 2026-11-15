@@ -451,6 +451,7 @@ def test_model_configuration_and_four_tools_follow_the_brief(client, monkeypatch
     assert selected.model_name == "openai/gpt-6-luna"
     assert selected.reasoning_effort == "medium"
     assert selected.model_kwargs["parallel_tool_calls"] is False
+    assert selected.model_dump()["max_tokens"] == 7152
     assert improver.MAX_MODEL_CALLS == 30
     assert {
         tool.name for tool in improver.make_tools(record["round_id"], lambda _: {})

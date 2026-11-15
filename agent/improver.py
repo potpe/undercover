@@ -18,6 +18,7 @@ from pydantic import SecretStr
 from agent import improver_api as api
 
 MAX_MODEL_CALLS = 30
+MAX_OUTPUT_TOKENS = 7152
 GOALS = """You improve UnderCover's claim agent configuration.
 Your goal includes preserving its business rules.
 The claim agent works from its instructions, policy wording and claims manual,
@@ -67,6 +68,7 @@ def make_model(record: dict) -> ChatOpenAI:
         "api_key": SecretStr(os.environ["OPENROUTER_API_KEY"]),
         "timeout": 300,
         "max_retries": 5,
+        "max_completion_tokens": MAX_OUTPUT_TOKENS,
         "model_kwargs": {"parallel_tool_calls": False},
     }
     if not free:

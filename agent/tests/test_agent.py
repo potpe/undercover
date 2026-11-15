@@ -196,6 +196,7 @@ def test_screening_model_uses_default_or_pinned_configuration(monkeypatch):
     assert settings[0]["reasoning_effort"] == "none"
     assert settings[1]["model"] == "openrouter/free"
     assert "reasoning_effort" not in settings[1]
+    assert {setting["max_completion_tokens"] for setting in settings} == {7152}
 
 
 def test_flagged_screen_uses_lab_prompt_and_never_invokes_claim_model(
@@ -850,7 +851,7 @@ def test_model_uses_the_supplied_version(monkeypatch):
     luna = {"model_name": "openai/gpt-6-luna", "reasoning_effort": "low"}
     assert main.model(luna).model_name == "openai/gpt-6-luna"
     assert main.model(luna).reasoning_effort == "low"
-    assert main.model(luna).model_dump()["max_tokens"] == 8192
+    assert main.model(luna).model_dump()["max_tokens"] == 7152
     free = {"model_name": "openrouter/free", "reasoning_effort": "default"}
     assert main.model(free).model_name == "openrouter/free"
     assert main.model(free).reasoning_effort is None

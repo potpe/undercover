@@ -34,6 +34,7 @@ OPENROUTER_BASE_URL = "https://openrouter.ai/api/v1"
 DEFAULT_MODEL = "openai/gpt-6-luna"
 MAX_MODEL_CALLS = 30
 MAX_SCREEN_ATTEMPTS = 3
+MAX_OUTPUT_TOKENS = 7152
 SCREEN_INSTRUCTIONS = (
     "You check claims sent to UnderCover Travel Insurance before a claims handler "
     "sees them.\n"
@@ -250,7 +251,7 @@ def model(configuration: dict[str, Any]) -> ChatOpenAI:
         "base_url": OPENROUTER_BASE_URL,
         "api_key": SecretStr(os.environ["OPENROUTER_API_KEY"]),
         "timeout": 60,
-        "max_completion_tokens": 8192,
+        "max_completion_tokens": MAX_OUTPUT_TOKENS,
     }
     if configuration["reasoning_effort"] != "default":
         settings["reasoning_effort"] = configuration["reasoning_effort"]
@@ -266,7 +267,7 @@ def screening_model(configuration: dict[str, Any]) -> ChatOpenAI:
         "base_url": OPENROUTER_BASE_URL,
         "api_key": SecretStr(os.environ["OPENROUTER_API_KEY"]),
         "timeout": 60,
-        "max_completion_tokens": 8192,
+        "max_completion_tokens": MAX_OUTPUT_TOKENS,
     }
     if not single_model_configuration:
         settings["reasoning_effort"] = "none"
