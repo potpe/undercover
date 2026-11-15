@@ -3,16 +3,22 @@
 import os
 from typing import Any
 
+from langchain_mcp_adapters.client import MultiServerMCPClient
+
 from agent.api import backend, canonical_claim, get_claim, log_activity
 from agent.claim_context import ClaimContext
+from agent.gateway import invoke_gateway_tool
+from agent.mcp_sync import run_mcp
 
 
 class DirectRoute:
-    """Claim-scoped access to app operations through the API-key backend."""
+    """Claim-scoped app API and unsigned context MCP access."""
 
     def __init__(self, claim_context: ClaimContext) -> None:
         self.claim_context = claim_context
         self.claim_id = claim_context.claim_id
+        self.context_url = claim_context.context_url or context_url()
+        self._context_tools: dict[str, Any] | None = None
 
     def get_claim(self) -> str:
         result = canonical_claim(get_claim(self.claim_id))
@@ -33,23 +39,25 @@ class DirectRoute:
         response.raise_for_status()
         return response.json()
 
-    def search_documents(self, document: str, query: str) -> Any:
-        with backend() as client:
-            response = client.post(
-                f"/api/claims/{self.claim_id}/document-search",
-                json={"document": document, "query": query},
+    def invoke_context_tool(self, operation: str, arguments: dict[str, Any]) -> Any:
+        if self._context_tools is None:
+            client = MultiServerMCPClient(
+                {
+                    "undercover-context": {
+                        "transport": "streamable_http",
+                        "url": self.context_url,
+                    }
+                },
+                tool_name_prefix=False,
+                handle_tool_errors=False,
             )
-        response.raise_for_status()
-        return response.json()
-
-    def read_section(self, document: str, section_id: str) -> Any:
-        with backend() as client:
-            response = client.post(
-                f"/api/claims/{self.claim_id}/document-section",
-                json={"document": document, "section_id": section_id},
-            )
-        response.raise_for_status()
-        return response.json()
+            self._context_tools = {
+                tool.name: tool for tool in run_mcp(client.get_tools())
+            }
+        tool = self._context_tools.get(operation)
+        if tool is None:
+            raise RuntimeError(f"Context service is missing operation {operation}")
+        return invoke_gateway_tool(tool, arguments)
 
     def calculate_payout(
         self, benefit: str, lines: list[dict[str, Any]], paid_by_others: float

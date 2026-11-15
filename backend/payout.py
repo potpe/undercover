@@ -4,8 +4,9 @@ from math import ceil, inf
 from typing import Any
 
 from fastapi import HTTPException
+from sqlalchemy import select
 
-from backend.database import add_activity, connect, get_claim_bundle
+from backend.database import add_activity, connect, get_claim_bundle, settings_table
 from backend.models import (
     Benefit,
     CalculationStep,
@@ -18,7 +19,6 @@ from backend.workflow import approval_limit
 CASH_LIMIT = 100.0
 HOTEL_NIGHT_LIMIT = 350.0
 MEALS_PER_TRAVELER_PER_DAY = 35.0
-DEDUCTIBLE_BENEFITS = {"baggage", "emergency_medical"}
 BENEFIT_MAXIMUM = {
     "trip_cancellation": "trip_cancellation_max",
     "trip_interruption": "trip_cancellation_max",
@@ -113,7 +113,7 @@ def work_out_payout(
             step("Less what others have paid or refunded", -paid_by_others)
         )
         total -= paid_by_others
-    if benefit in DEDUCTIBLE_BENEFITS and total > 0:
+    if benefit in bundle["deductible_applies_to"] and total > 0:
         deductible = min(plan["deductible"], total)
         if deductible:
             calculation.append(step("Less the deductible", -deductible))
@@ -144,6 +144,12 @@ def calculate_claim_payout(claim_id: str, request: PayoutRequest) -> PayoutRespo
         raise HTTPException(status_code=404, detail="Claim not found")
     with connect() as connection:
         limit = approval_limit(connection)
+        deductible_applies_to = connection.execute(
+            select(settings_table.c.data).where(
+                settings_table.c.key == "deductible_applies_to"
+            )
+        ).scalar_one()
+    bundle["deductible_applies_to"] = deductible_applies_to
     result = work_out_payout(
         bundle,
         request.benefit,

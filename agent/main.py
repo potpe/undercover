@@ -3,12 +3,12 @@
 import os
 from datetime import UTC, datetime
 from time import perf_counter
-from typing import Annotated, Any, Literal, TypedDict
+from typing import Annotated, Any, TypedDict
 
 import httpx
 from langchain_core.messages import AnyMessage, HumanMessage, SystemMessage
 from langchain_core.runnables import RunnableConfig
-from langchain_core.tools import ToolException, tool
+from langchain_core.tools import ToolException
 from langchain_openai import ChatOpenAI
 from langgraph.checkpoint.base import BaseCheckpointSaver
 from langgraph.graph import END, START, StateGraph
@@ -25,15 +25,12 @@ from agent.gateway import pay_gateway
 from agent.tools import canonical_security_claim, route_tools
 from agent.tracing import trace_claim
 from backend.models import (
-    Benefit,
     DecisionKind,
     DecisionRequest,
     ModelCallRequest,
-    PayoutLine,
     WorkPeriodRequest,
 )
 
-BACKEND_URL = "http://localhost:8000"
 OPENROUTER_BASE_URL = "https://openrouter.ai/api/v1"
 DEFAULT_MODEL = "openai/gpt-6-luna"
 MAX_MODEL_CALLS = 30
@@ -91,76 +88,6 @@ def log_activity(claim_id: str, message: str) -> None:
             f"/api/claims/{claim_id}/activity", json={"message": message}
         )
     response.raise_for_status()
-
-
-@tool
-def read_claim(claim_id: str) -> dict[str, Any]:
-    """Read a claim, its policy and plan, and the customer's claim history."""
-    with backend() as client:
-        response = client.get(f"/api/claims/{claim_id}")
-    response.raise_for_status()
-    log_activity(claim_id, "Read claim, policy and customer claim history")
-    return response.json()
-
-
-@tool
-def search_documents(
-    claim_id: str, document: Literal["policy_wording", "claims_manual"], query: str
-) -> list[dict[str, Any]]:
-    """Find relevant policy wording or claims manual sections for a claim."""
-    with backend() as client:
-        response = client.post(
-            f"/api/claims/{claim_id}/document-search",
-            json={"document": document, "query": query},
-        )
-    response.raise_for_status()
-    return response.json()
-
-
-@tool
-def read_document_section(
-    claim_id: str, document: Literal["policy_wording", "claims_manual"], section_id: str
-) -> dict[str, str]:
-    """Read one policy wording or claims manual section for a claim."""
-    with backend() as client:
-        response = client.post(
-            f"/api/claims/{claim_id}/document-section",
-            json={"document": document, "section_id": section_id},
-        )
-    response.raise_for_status()
-    return response.json()
-
-
-@tool(parse_docstring=True)
-def calculate_payout(
-    claim_id: str,
-    benefit: Benefit,
-    lines: list[PayoutLine],
-    paid_by_others: float,
-) -> dict[str, Any]:
-    """Work out an approved claim's payout with UnderCover's backend rules.
-
-    Args:
-        claim_id: The claim being worked
-        benefit: The benefit the claim is paid under
-        lines: Every covered item or expense, excluding ineligible lines.
-            Use zero for nights or hours that do not apply.
-        paid_by_others: Total paid or refunded by carriers, hotels or others
-
-    Returns:
-        The calculation, exact payout and whether the backend requires sign-off
-    """
-    with backend() as client:
-        response = client.post(
-            f"/api/claims/{claim_id}/payout",
-            json={
-                "benefit": benefit,
-                "lines": [line.model_dump() for line in lines],
-                "paid_by_others": paid_by_others,
-            },
-        )
-    response.raise_for_status()
-    return response.json()
 
 
 def save_decision(claim_id: str, request: DecisionRequest) -> dict[str, Any]:

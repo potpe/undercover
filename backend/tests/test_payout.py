@@ -114,7 +114,12 @@ def synthetic_rules(
         "passport_max": 500,
         "emergency_medical_max": 100000,
     }
-    bundle = {"policy": policy, "plan": plan, "add_ons": add_ons or []}
+    bundle = {
+        "policy": policy,
+        "plan": plan,
+        "add_ons": add_ons or [],
+        "deductible_applies_to": ["baggage", "emergency_medical"],
+    }
     return work_out_payout(
         bundle,
         benefit,

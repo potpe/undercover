@@ -10,6 +10,7 @@ from sqlalchemy import Connection, RowMapping, select
 from backend.database import (
     configuration_versions_table,
     connect,
+    documents_table,
     iso,
     recipe_versions_table,
     settings_table,
@@ -68,9 +69,36 @@ def agent_configuration(version: int | None = None) -> dict[str, Any]:
     """Return only the fields a claim agent needs for one version."""
     with connect() as connection:
         row = configuration_row(connection, version)
+        documents = {
+            document["document"]: document
+            for document in connection.execute(
+                select(documents_table).where(
+                    documents_table.c.document.in_(("policy_wording", "claims_manual"))
+                )
+            )
+            .mappings()
+            .all()
+        }
+        instructions = row["instructions"].rstrip()
+        if documents:
+            appended = []
+            for name, title in (
+                ("policy_wording", "Policy wording"),
+                ("claims_manual", "Claims manual"),
+            ):
+                document = documents.get(name)
+                if document is not None:
+                    appended.append(
+                        f"## {title}, version {document['version']}\n\n"
+                        f"{document['content'].rstrip()}"
+                    )
+            instructions = (
+                f"{instructions}\n\n## Context documents\n\n"
+                + "\n\n---\n\n".join(appended)
+            )
         return {
             "version": row["version"],
-            "instructions": row["instructions"],
+            "instructions": instructions,
             "model_name": row["model_name"],
             "reasoning_effort": row["reasoning_effort"],
         }

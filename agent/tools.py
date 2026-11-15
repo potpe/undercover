@@ -20,15 +20,23 @@ from agent.gateway import (
 from backend.models import Benefit, PayoutLine
 
 APP_TOOL_PREFIX = "undercover-app___"
+CONTEXT_TOOL_PREFIX = "undercover-context___"
 APP_OPERATIONS = {
     "get_claim",
     "get_policy",
     "get_claim_history",
-    "search_documents",
-    "read_section",
     "calculate_payout",
     "record_decision",
     "pay_claim",
+}
+CONTEXT_OPERATIONS = {
+    "lookup_term",
+    "describe_fields",
+    "get_plan",
+    "get_claim_rules",
+    "search_reference_data",
+    "search_documents",
+    "read_section",
 }
 
 
@@ -40,14 +48,25 @@ class EmptyInput(StrictToolInput):
     pass
 
 
-class SearchInput(StrictToolInput):
-    document: Literal["policy_wording", "claims_manual"]
+class QueryInput(StrictToolInput):
     query: str
 
 
 class SectionInput(StrictToolInput):
-    document: Literal["policy_wording", "claims_manual"]
-    section_id: str
+    document: str
+    number: int
+
+
+class TermInput(StrictToolInput):
+    term: str
+
+
+class RecordInput(StrictToolInput):
+    record: str
+
+
+class PlanInput(StrictToolInput):
+    plan: str
 
 
 class StrictPayoutLine(PayoutLine):
@@ -75,9 +94,11 @@ class ModelToolRoute:
     remote: dict[str, Any]
 
     def invoke(self, name: str, arguments: dict[str, Any]) -> Any:
+        if name in CONTEXT_OPERATIONS:
+            return self.invoke_context(name, arguments)
         if not self.selected_gateway:
             return _invoke_direct(self.direct, self.claim_context, name, arguments)
-        tool = self.remote.get(name)
+        tool = self.remote.get(f"{APP_TOOL_PREFIX}{name}")
         if tool is None:
             raise RuntimeError(f"Gateway is missing app operation {name}")
         return _invoke_gateway(
@@ -87,13 +108,31 @@ class ModelToolRoute:
             arguments,
         )
 
+    def invoke_context(self, name: str, arguments: dict[str, Any]) -> Any:
+        if not self.selected_gateway:
+            try:
+                return self.direct.invoke_context_tool(name, arguments)
+            except ToolException as error:
+                log_activity(self.claim_context.claim_id, f"Context refusal: {error}")
+                raise
+        tool = self.remote.get(f"{CONTEXT_TOOL_PREFIX}{name}")
+        if tool is None:
+            raise RuntimeError(f"Gateway is missing context operation {name}")
+        return _invoke_gateway(tool, self.claim_context, name, arguments)
+
 
 def _gateway_tools_by_operation() -> dict[str, Any]:
     return {
-        tool.name.removeprefix(APP_TOOL_PREFIX): tool
+        tool.name: tool
         for tool in gateway_tools()
-        if tool.name.startswith(APP_TOOL_PREFIX)
-        and tool.name.removeprefix(APP_TOOL_PREFIX) in APP_OPERATIONS
+        if (
+            tool.name.startswith(APP_TOOL_PREFIX)
+            and tool.name.removeprefix(APP_TOOL_PREFIX) in APP_OPERATIONS
+        )
+        or (
+            tool.name.startswith(CONTEXT_TOOL_PREFIX)
+            and tool.name.removeprefix(CONTEXT_TOOL_PREFIX) in CONTEXT_OPERATIONS
+        )
     }
 
 
@@ -104,8 +143,6 @@ def _arguments_for_gateway(
         "get_claim": {"claim_id": context.claim_id},
         "get_policy": {"policy_id": context.policy_id},
         "get_claim_history": {"customer_id": context.customer_id},
-        "search_documents": {"claim_id": context.claim_id},
-        "read_section": {"claim_id": context.claim_id},
         "calculate_payout": {"claim_id": context.claim_id},
         "record_decision": {
             "claim_id": context.claim_id,
@@ -123,14 +160,20 @@ def _invoke_gateway(
     arguments: dict[str, Any],
 ) -> Any:
     try:
-        result = invoke_gateway_tool(
-            tool, _arguments_for_gateway(operation, arguments, context)
+        gateway_arguments = (
+            _arguments_for_gateway(operation, arguments, context)
+            if operation in APP_OPERATIONS
+            else arguments
         )
+        result = invoke_gateway_tool(tool, gateway_arguments)
     except McpError as error:
         reason = str(error)
         log_activity(context.claim_id, f"Gateway refusal: {reason}")
         raise ToolException(reason) from error
     except ToolException as error:
+        if operation in CONTEXT_OPERATIONS:
+            log_activity(context.claim_id, f"Context refusal: {error}")
+            raise
         if not is_gateway_tool_refusal(error):
             raise
         reason = str(error)
@@ -227,6 +270,9 @@ def route_tools(
             },
         )
 
+    def context_call(operation: str, **arguments: Any) -> Any:
+        return call(operation, arguments)
+
     return [
         StructuredTool.from_function(
             name="get_claim",
@@ -247,22 +293,6 @@ def route_tools(
             args_schema=EmptyInput,
         ),
         StructuredTool.from_function(
-            name="search_documents",
-            description="Find relevant policy wording or claims manual sections.",
-            func=lambda document, query: call(
-                "search_documents", {"document": document, "query": query}
-            ),
-            args_schema=SearchInput,
-        ),
-        StructuredTool.from_function(
-            name="read_section",
-            description="Read a policy wording or claims manual section.",
-            func=lambda document, section_id: call(
-                "read_section", {"document": document, "section_id": section_id}
-            ),
-            args_schema=SectionInput,
-        ),
-        StructuredTool.from_function(
             name="calculate_payout",
             description="Calculate a claim payout using backend rules.",
             func=calculate_payout,
@@ -273,6 +303,50 @@ def route_tools(
             description="Submit the proposed decision for this claim.",
             func=record_decision,
             args_schema=DecisionInput,
+        ),
+        StructuredTool.from_function(
+            name="lookup_term",
+            description="Look up a defined term and its source.",
+            func=lambda term: context_call("lookup_term", term=term),
+            args_schema=TermInput,
+        ),
+        StructuredTool.from_function(
+            name="describe_fields",
+            description="Describe the fields in a business record.",
+            func=lambda record: context_call("describe_fields", record=record),
+            args_schema=RecordInput,
+        ),
+        StructuredTool.from_function(
+            name="get_plan",
+            description="Get a plan's benefits, deductibles and add-ons.",
+            func=lambda plan: context_call("get_plan", plan=plan),
+            args_schema=PlanInput,
+        ),
+        StructuredTool.from_function(
+            name="get_claim_rules",
+            description="Get the claims rules and their source.",
+            func=lambda: context_call("get_claim_rules"),
+            args_schema=EmptyInput,
+        ),
+        StructuredTool.from_function(
+            name="search_reference_data",
+            description="Search reference data for a query.",
+            func=lambda query: context_call("search_reference_data", query=query),
+            args_schema=QueryInput,
+        ),
+        StructuredTool.from_function(
+            name="search_documents",
+            description="Search both policy wording and claims manual documents.",
+            func=lambda query: context_call("search_documents", query=query),
+            args_schema=QueryInput,
+        ),
+        StructuredTool.from_function(
+            name="read_section",
+            description="Read a numbered policy wording or claims manual section.",
+            func=lambda document, number: context_call(
+                "read_section", document=document, number=number
+            ),
+            args_schema=SectionInput,
         ),
     ]
 

@@ -5,7 +5,7 @@ The data behind UnderCover Travel Insurance, a fictional insurer. Everything her
 ## The insurer's systems
 
 - `company.json`: company settings, including the $1,000 payout approval limit.
-- `plans.json`: the three plans (Economy, Premium, First) with their limits, waiting periods and deductibles, and the three add-ons.
+- `plans.json`: the legacy copy of the three plans (Economy, Premium, First) and add-ons. It remains in the repository but is no longer a product input; context seeding uses `context/plans.yaml`.
 - `policies.json`: one policy per trip, with the plan, the add-ons, the purchase date, the trip and the travelers.
 - `customers.json`: contact details and claim history, with the date and a one line summary of each earlier claim. This is personal data.
 - `handlers.json`: the claims handlers.
@@ -13,8 +13,10 @@ The data behind UnderCover Travel Insurance, a fictional insurer. Everything her
 
 ## The documents
 
-- `policy_wording.md`: the contract with the customer. Short enough to fit in a prompt.
-- `claims_manual.md`: the internal handling manual. Longer, and it holds rules the wording does not, such as the third claim in 12 months, losses to wild animals and meals without receipts.
+- `policy_wording.md`: a legacy copy of the contract. The product uses the canonical `context/policy_wording.md` and stores its full contents/version in the backend documents table during seeding.
+- `claims_manual.md`: a legacy copy of the internal handling manual. The product uses `context/claims_manual.md` and stores its full contents/version in the backend documents table during seeding.
+
+The seven files in `context/` are data governance's read-only sources for field definitions, glossary terms, plans, claim rules, reference facts, policy wording and the claims manual. Do not change them. The context MCP service reads them; backend seeding imports plan rules and complete versioned documents from them. Ordinary backend imports and requests do not read those files. The instructions append both documents from the backend documents table. The approval limit remains the setting in `company.json`.
 
 ## The evaluation set
 

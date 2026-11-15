@@ -1,12 +1,13 @@
 from pathlib import Path
 
 import pytest
-from sqlalchemy import insert, update
+from sqlalchemy import insert, select, update
 
 from backend.configurations import text_diff
 from backend.database import (
     configuration_versions_table,
     connect,
+    documents_table,
     recipe_versions_table,
     reseed_database,
     settings_table,
@@ -56,10 +57,59 @@ def test_claim_configuration_contains_no_scores_or_handler_decisions(client):
         "read_section",
         "record_decision",
     ):
-        assert f"`{tool}`" in instructions
+        assert tool in instructions
     assert "If `record_decision` refuses" in instructions
     assert "Payment is graph-only" in instructions
     assert "you have no decision or payment tool" not in instructions
+
+
+def test_effective_instructions_append_database_documents_to_pinned_versions(
+    client, monkeypatch
+):
+    with connect() as connection:
+        documents = {
+            row["document"]: row
+            for row in connection.execute(select(documents_table)).mappings()
+        }
+        connection.execute(
+            insert(configuration_versions_table).values(
+                version=2,
+                instructions="Pinned version two instructions.",
+                model_name="openai/gpt-6-luna",
+                reasoning_effort="low",
+                reason="Test a pinned instruction version",
+                proposed_by="Test",
+                proposed_at=timestamp(),
+            )
+        )
+
+    context_directory = Path("context").resolve()
+    read_text = Path.read_text
+
+    def deny_context_source_reads(path, *args, **kwargs):
+        if path.resolve().is_relative_to(context_directory):
+            raise AssertionError("Effective configuration read a context source file")
+        return read_text(path, *args, **kwargs)
+
+    monkeypatch.setattr(Path, "read_text", deny_context_source_reads)
+    version_one = client.get("/api/agent/configuration/1").json()["instructions"]
+    version_two = client.get("/api/agent/configuration/2").json()["instructions"]
+    current = client.get("/api/agent/configuration/current").json()["instructions"]
+    handler_view = client.get("/api/agent/instructions").json()["claim"]
+
+    assert version_one.startswith(
+        Path("backend/agent_instructions.md").read_text().rstrip()
+    )
+    assert version_two.startswith("Pinned version two instructions.")
+    assert current == version_one
+    assert handler_view == version_one
+    assert "## Context documents" in version_one
+    assert "## Policy wording, version 2026.1" in version_one
+    assert "## Claims manual, version 2026.2" in version_one
+    assert documents["policy_wording"]["content"].rstrip() in version_one
+    assert documents["claims_manual"]["content"].rstrip() in version_one
+    version_two_appendix = version_two[version_two.index("## Context documents") :]
+    assert version_one.endswith(version_two_appendix)
 
 
 def test_diff_uses_difflib_additions_and_removals():

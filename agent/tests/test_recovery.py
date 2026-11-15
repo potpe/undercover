@@ -29,8 +29,6 @@ class StubModel:
 
 
 def tool_call(call_id, name, args):
-    if name == "read_claim":
-        name, args = "get_claim", {}
     return AIMessage(
         content="", tool_calls=[{"name": name, "args": args, "id": call_id}]
     )
@@ -113,7 +111,7 @@ def test_interrupted_claim_resumes_same_step_thread_and_attempt(client, monkeypa
     run_id = create_one_claim_dispatch(client, "CLM-1001")
     interrupted_model = StubModel(
         [
-            tool_call("read", "read_claim", {"claim_id": "CLM-1001"}),
+            tool_call("read", "get_claim", {}),
             KeyboardInterrupt(),
         ]
     )

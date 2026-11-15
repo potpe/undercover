@@ -14,15 +14,19 @@ The UnderCover Agent works the queue the way a handler does. A dispatch covers e
 
 The claim model uses the same claim-scoped tools whether it reaches the app directly or through AgentCore Gateway. The model cannot supply claim, policy or customer ids for its reads/calculation, nor a decision maker; the graph supplies those from the current claim. The backend requires and persists `decided_by`: the agent supplies `UnderCover Agent (configuration version N)` and the screening referral supplies `Security check`. The model records a decision through a tool, but payment remains a graph operation. Bookkeeping, runs, versions, the improver, and the security check's claim read/referral continue to use the direct app route with the agent key. When configured, Gateway requests use AWS CLI credentials and region and SigV4 for `bedrock-agentcore`; otherwise app model tools use the direct API and its key.
 
-The security check and both app routes use the same canonical claim text. App and Gateway policy refusals, and context-tool refusals when those tools are added, reach the model as refusals, never as successful-looking answers. A Gateway payment refusal is recorded directly and moves an eligible approved, unpaid claim from `in_progress` to `waiting_for_sign_off`, storing `gateway_refused` and `gateway_refusal_reason`. The agent-key-only bookkeeping operation is `POST /api/internal/claims/{claim_id}/gateway-hold` with a required `reason`; it is not part of the agent OpenAPI document or Gateway. The claim bundle exposes the refusal fields. The existing handler sign-off records payment atomically; resuming the graph does not pay again. The sign-off explanation identifies a Gateway refusal rather than saying the app limit was exceeded.
+The security check and both app routes use the same canonical claim text. App, context and Gateway policy refusals reach the model as refusals, never as successful-looking answers. A Gateway payment refusal is recorded directly and moves an eligible approved, unpaid claim from `in_progress` to `waiting_for_sign_off`, storing `gateway_refused` and `gateway_refusal_reason`. The agent-key-only bookkeeping operation is `POST /api/internal/claims/{claim_id}/gateway-hold` with a required `reason`; it is not part of the agent OpenAPI document or Gateway. The claim bundle exposes the refusal fields. The existing handler sign-off records payment atomically; resuming the graph does not pay again. The sign-off explanation identifies a Gateway refusal rather than saying the app limit was exceeded.
 
 The agent reads `UNDERCOVER_API`, `UNDERCOVER_GATEWAY_URL`, `UNDERCOVER_CONTEXT` and `UNDERCOVER_MEMORY_ID` when constructing the applicable client or claim graph, not at module import, so late `.env` loading is honored. `UNDERCOVER_MEMORY_ID` is read for forward-compatible configuration but is unused until Phase 4. MCP operations remain synchronous to the graph: each short asynchronous MCP call runs on its own worker thread and event loop, without consuming or replacing the main thread's event loop.
+
+The read-only context service is an independent MCP service. Its seven data-governance files are owned by their named systems and must remain unchanged. Each answer carries `answer` and `sources`; each flat source identifies `file`, `system`, `owner` and `reviewed`. The app reads these files only during explicit seeding: plans come from `context/plans.yaml`, and the complete policy wording and claims manual, including their versions, are stored in the backend documents table. Instructions use those stored document contents. Legacy `data/plans.json`, `data/policy_wording.md` and `data/claims_manual.md` remain in the repository but are no longer product inputs. The approval limit continues to come from `data/company.json`.
+
+The service's read-only tools are `lookup_term`, `describe_fields`, `get_plan`, `get_claim_rules`, `search_reference_data`, `search_documents` and `read_section`. They return the matching definitions, plan/rule/reference answers, or document sections with source provenance. An unknown term returns the glossary's known terms. Missing sections and invalid inputs are refusals rather than empty successful answers.
 
 For each claim the graph should:
 
 - screen the complete customer-written claim for hidden instructions before the claim model sees it; refer flagged claims with zero payout, the check's reason and `Security check` as the section
 - read the claim, the customer's policy and claim history, and every supporting document
-- find and read the relevant sections of the policy wording and claims manual rather than receiving whole documents
+- use the read-only context service for definitions, plan details, claim rules, reference facts, and searches/reads of relevant policy wording and claims manual sections; effective instructions also include both backend-stored documents
 - approve, decline or refer the claim
 - use the backend's payout rules when it approves
 - explain the decision in two or three sentences, along with the relevant section of the policy
@@ -56,15 +60,17 @@ Our goal is to handle claims straight through, as accurately as our handlers do.
 - Our handlers' own decisions on these claims are in `data/evals/`. We use them to check the agent's work. The agent must never see them.
 - Amounts are in US dollars.
 
-The generated `/api/agent/openapi.json` document contains exactly `get_claim`, `get_policy`, `get_claim_history`, `search_documents`, `read_section`, `calculate_payout`, `record_decision` and `pay_claim`. It accepts the key or handler sign-in, has no deployment address or key tool input, and excludes handler actions, runs, evaluations and improvement. The Gateway-refusal hold operation is also excluded. In the agent's model surface, `pay_claim` is a graph operation, not a model tool.
+The generated `/api/agent/openapi.json` document contains exactly `get_claim`, `get_policy`, `get_claim_history`, `calculate_payout`, `record_decision` and `pay_claim`. Document search and section reads belong to the context service, not the app API. The API document accepts the key or handler sign-in, has no deployment address or key tool input, and excludes handler actions, runs, evaluations and improvement. The Gateway-refusal hold operation is also excluded. In the agent's model surface, `pay_claim` is a graph operation, not a model tool.
 
 The backend can serve the built dashboard and API at one address as an ordinary web server or through a Lambda handler. Lambda invocation does not run startup seeding or write local files; Supabase holds the existing records. Laptop development remains supported, and this build creates no cloud resources.
 
 `npm run build` writes `dashboard/dist` using `VITE_SUPABASE_URL` and `VITE_SUPABASE_PUBLISHABLE_KEY` from root `.env` or the process environment; tests never read root `.env`. Lambda uses `backend.main.handler`, with `DATABASE_URL`, `VITE_SUPABASE_URL` and `UNDERCOVER_API_KEY`; its database connects through Supabase's transaction pooler on port 6543.
 
+The context service runs locally at `http://127.0.0.1:8006/mcp`. Its separate Lambda package contains `context/` and the `context` dependency group's Linux/Python 3.12 packages, with handler `context.server.handler`, behind a Function URL using AWS_IAM and an empty application environment. The app package does not include context code; backend imports/requests do not load `context/`, and seeding is the only backend path that reads its source files.
+
 ## Our records
 
-Everything is in `data/`, described in `data/README.md`: the claims queue, the policies, the customers, the plans, the handlers, the policy wording and the claims manual. The held-out claims in `data/evals/` are for checking the agent later and stay out of the queue.
+Operational claims, policies, customers, handlers, and company settings are in `data/`, described in `data/README.md`. The seven governance sources and canonical plan/document inputs are in `context/`; legacy plan and document copies under `data/` remain but are not product inputs. The held-out claims in `data/evals/` are for checking the agent later and stay out of the queue.
 
 Seeding appends the security claim, policy and customer in `data/security/` to the original 25 operational claims. Its handler decision is not seeded, and `data/claims.json` stays unchanged.
 

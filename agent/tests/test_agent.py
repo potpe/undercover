@@ -1,7 +1,6 @@
 import json
 from copy import deepcopy
 from datetime import UTC, datetime
-from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
@@ -221,6 +220,43 @@ def use_backend(monkeypatch):
     monkeypatch.setattr(api, "backend", test_backend)
     monkeypatch.setattr(direct, "backend", test_backend)
     monkeypatch.setattr(tools, "gateway_tools", lambda: [])
+    monkeypatch.setattr(
+        direct.DirectRoute,
+        "invoke_context_tool",
+        lambda _self, operation, _arguments: {
+            "answer": (
+                [
+                    {
+                        "source": {
+                            "file": "claims_manual.md",
+                            "system": "Claims manual",
+                            "owner": "Claims Operations",
+                            "reviewed": "2026-01-01",
+                        },
+                        "document": "claims_manual",
+                        "section_id": "10",
+                        "title": "Meals",
+                        "snippet": "$35 per traveler",
+                    }
+                ]
+                if operation == "search_documents"
+                else {
+                    "document": "claims_manual",
+                    "section_id": "10",
+                    "title": "Meals",
+                    "content": "$35 per traveler",
+                }
+            ),
+            "sources": [
+                {
+                    "file": "claims_manual.md",
+                    "system": "Claims manual",
+                    "owner": "Claims Operations",
+                    "reviewed": "2026-01-01",
+                }
+            ],
+        },
+    )
     monkeypatch.setattr(main, "screening_model", lambda _configuration: ScreeningStub())
 
 
@@ -240,11 +276,6 @@ def create_run(client):
 
 
 def tool_call(call_id, name, args):
-    mapped = {
-        "read_claim": "get_claim",
-        "read_document_section": "read_section",
-    }
-    name = mapped.get(name, name)
     args = {key: value for key, value in args.items() if key != "claim_id"}
     return AIMessage(
         content="", tool_calls=[{"name": name, "args": args, "id": call_id}]
@@ -705,40 +736,36 @@ def test_completed_screen_is_checkpointed_across_resume_and_new_threads(
     assert len(screen_calls) == 2
 
 
-def test_claim_tools_use_section_level_backend_apis(client, monkeypatch):
+def test_claim_tools_use_direct_api_and_context_tools(client, monkeypatch):
     use_backend(monkeypatch)
 
-    bundle = main.read_claim.invoke({"claim_id": "CLM-1001"})
-    found = main.search_documents.invoke(
-        {
-            "claim_id": "CLM-1001",
-            "document": "claims_manual",
-            "query": "meals without receipts",
-        }
-    )
-    section = main.read_document_section.invoke(
-        {"claim_id": "CLM-1001", "document": "claims_manual", "section_id": "10"}
+    tool_list = {
+        item.name: item for item in tools.route_tools(claim_context("CLM-1001"))
+    }
+    bundle = json.loads(tool_list["get_claim"].invoke({}))
+    found = tool_list["search_documents"].invoke({"query": "meals without receipts"})
+    section = tool_list["read_section"].invoke(
+        {"document": "claims_manual", "number": 10}
     )
 
     assert bundle["claim"]["claim_id"] == "CLM-1001"
     assert bundle["policy"]["policy_id"] == "POL-2001"
-    assert found[0]["section_id"] == "10"
-    assert "$35 per traveler" in section["content"]
-    assert not hasattr(main, "read_policy_wording")
-    assert not hasattr(main, "pay_claim")
+    assert found["answer"][0]["section_id"] == "10"
+    assert "$35 per traveler" in section["answer"]["content"]
+    assert not hasattr(main, "search_documents")
+    assert not hasattr(main, "read_document_section")
 
 
 def test_graph_approves_and_pays_a_small_claim(client, monkeypatch):
     use_backend(monkeypatch)
     replies = [
-        tool_call("1", "read_claim", {"claim_id": "CLM-1001"}),
+        tool_call("1", "get_claim", {}),
         tool_call(
             "2",
-            "read_document_section",
+            "read_section",
             {
-                "claim_id": "CLM-1001",
                 "document": "policy_wording",
-                "section_id": "3",
+                "number": 3,
             },
         ),
         tool_call(
@@ -861,7 +888,7 @@ def test_graph_interrupts_and_resumes_an_over_limit_claim(client, monkeypatch):
         ),
     )
     replies = [
-        tool_call("1", "read_claim", {"claim_id": "CLM-1003"}),
+        tool_call("1", "get_claim", {}),
         tool_call(
             "2",
             "calculate_payout",
@@ -1095,10 +1122,15 @@ def test_gateway_decision_refusal_returns_to_model_for_correction(
         "get_claim",
         "get_policy",
         "get_claim_history",
-        "search_documents",
-        "read_section",
         "calculate_payout",
         "record_decision",
+        "lookup_term",
+        "describe_fields",
+        "get_plan",
+        "get_claim_rules",
+        "search_reference_data",
+        "search_documents",
+        "read_section",
     }
     refusal_message = next(
         message for message in claim_model.inputs[1] if isinstance(message, ToolMessage)
@@ -1288,7 +1320,7 @@ def test_resumed_model_usage_belongs_to_the_current_run(client, monkeypatch):
                 raise reply
             return reply
 
-    first_reply = tool_call("read", "read_claim", {"claim_id": "CLM-1001"})
+    first_reply = tool_call("read", "get_claim", {})
     first_reply.response_metadata["token_usage"] = {
         "prompt_tokens": 10,
         "completion_tokens": 2,
@@ -1379,16 +1411,18 @@ def test_run_configuration_fetches_its_pinned_score_free_version(client, monkeyp
     first_configuration = main.run_configuration("CLM-1001", first_run)
     second_configuration = main.run_configuration("CLM-1002", second_run)
 
-    assert first_configuration == {
-        "version": 1,
-        "instructions": Path("backend/agent_instructions.md").read_text(),
-        "model_name": "openai/gpt-6-luna",
-        "reasoning_effort": "low",
-        "round_id": None,
-    }
+    first_expected = client.get("/api/agent/configuration/1").json()
+    second_expected = client.get("/api/agent/configuration/2").json()
+    assert first_configuration == {**first_expected, "round_id": None}
+    assert first_configuration["instructions"].startswith(
+        "You are the UnderCover claim agent."
+    )
+    assert "## Context documents" in first_configuration["instructions"]
+    assert "## Policy wording, version" in first_configuration["instructions"]
+    assert "## Claims manual, version" in first_configuration["instructions"]
     assert second_configuration == {
         "version": 2,
-        "instructions": "Version 2 uses a general evidence rule.",
+        "instructions": second_expected["instructions"],
         "model_name": "openai/gpt-6-luna",
         "reasoning_effort": "medium",
         "round_id": None,
@@ -1415,7 +1449,7 @@ def test_run_configuration_fetches_its_pinned_score_free_version(client, monkeyp
     assert selected_configurations[0]["version"] == 2
     assert selected_configurations[0]["model_name"] == "openai/gpt-6-luna"
     assert selected_configurations[0]["reasoning_effort"] == "medium"
-    assert system_prompts == ["Version 2 uses a general evidence rule."]
+    assert system_prompts == [second_expected["instructions"]]
     assert client.get("/api/claims/CLM-1002").json()["decision"]["decided_by"] == (
         "UnderCover Agent (configuration version 2)"
     )

@@ -2,8 +2,6 @@ AGENT_OPERATION_IDS = {
     "get_claim",
     "get_policy",
     "get_claim_history",
-    "search_documents",
-    "read_section",
     "calculate_payout",
     "record_decision",
     "pay_claim",

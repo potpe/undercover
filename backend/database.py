@@ -7,6 +7,7 @@ from functools import lru_cache
 from pathlib import Path
 from typing import Any
 
+import yaml
 from sqlalchemy import (
     JSON,
     Boolean,
@@ -31,7 +32,7 @@ from sqlalchemy import (
 from sqlalchemy.pool import NullPool
 from sqlalchemy.schema import CreateSchema, DropSchema
 
-from backend.documents import parse_sections, rank_sections
+from backend.documents import load_context_documents
 
 ROOT = Path(__file__).resolve().parent.parent
 DATA_DIR = ROOT / "data"
@@ -85,6 +86,14 @@ plans_table = Table(
     metadata,
     Column("plan", String, primary_key=True),
     Column("data", JSON, nullable=False),
+)
+documents_table = Table(
+    "documents",
+    metadata,
+    Column("document", String, primary_key=True),
+    Column("version", String, nullable=False),
+    Column("source", JSON, nullable=False),
+    Column("content", Text, nullable=False),
 )
 handlers_table = Table(
     "handlers",
@@ -189,14 +198,6 @@ activity_table = Table(
     Column("claim_id", String, nullable=False),
     Column("message", Text, nullable=False),
     Column("created_at", DateTime(timezone=True), nullable=False),
-)
-document_sections_table = Table(
-    "document_sections",
-    metadata,
-    Column("document", String, primary_key=True),
-    Column("section_id", String, primary_key=True),
-    Column("title", String, nullable=False),
-    Column("content", Text, nullable=False),
 )
 document_reads_table = Table(
     "document_reads",
@@ -369,16 +370,14 @@ def iso(value: Any) -> str | None:
 
 
 def seed_documents(connection: Connection) -> None:
-    for document in ("policy_wording", "claims_manual"):
-        for section in parse_sections(document):
-            exists = connection.execute(
-                select(document_sections_table.c.section_id).where(
-                    document_sections_table.c.document == document,
-                    document_sections_table.c.section_id == section["section_id"],
-                )
-            ).first()
-            if exists is None:
-                connection.execute(insert(document_sections_table).values(**section))
+    for document in load_context_documents():
+        exists = connection.execute(
+            select(documents_table.c.document).where(
+                documents_table.c.document == document["document"]
+            )
+        ).first()
+        if exists is None:
+            connection.execute(insert(documents_table).values(**document))
 
 
 def seed_business_data(connection: Connection) -> None:
@@ -408,7 +407,9 @@ def seed_business_data(connection: Connection) -> None:
                 customer_id=customer["customer_id"], data=customer
             )
         )
-    plan_data = load_json("plans.json")
+    plan_data = yaml.safe_load(
+        (ROOT / "context" / "plans.yaml").read_text(encoding="utf-8")
+    )
     for plan in plan_data["plans"]:
         connection.execute(insert(plans_table).values(plan=plan["plan"], data=plan))
     for handler in load_json("handlers.json"):
@@ -746,66 +747,3 @@ def list_handlers() -> list[dict[str, Any]]:
             .all()
         )
     return list(rows)
-
-
-def search_document(document: str, query: str) -> list[dict[str, Any]]:
-    with connect() as connection:
-        rows = (
-            connection.execute(
-                select(document_sections_table).where(
-                    document_sections_table.c.document == document
-                )
-            )
-            .mappings()
-            .all()
-        )
-    return rank_sections([dict(row) for row in rows], query)
-
-
-def read_document_section(
-    claim_id: str, document: str, section_id: str
-) -> dict[str, Any] | None:
-    with connect() as connection:
-        row = (
-            connection.execute(
-                select(document_sections_table).where(
-                    document_sections_table.c.document == document,
-                    document_sections_table.c.section_id == section_id,
-                )
-            )
-            .mappings()
-            .first()
-        )
-        if row is None:
-            return None
-        existing = connection.execute(
-            select(document_reads_table.c.id).where(
-                document_reads_table.c.claim_id == claim_id,
-                document_reads_table.c.document == document,
-                document_reads_table.c.section_id == section_id,
-            )
-        ).first()
-        if existing is None:
-            connection.execute(
-                insert(document_reads_table).values(
-                    claim_id=claim_id,
-                    document=document,
-                    section_id=section_id,
-                    title=row["title"],
-                    created_at=timestamp(),
-                )
-            )
-            label = (
-                "Policy wording" if document == "policy_wording" else "Claims manual"
-            )
-            insert_activity(
-                connection,
-                claim_id,
-                f"Read {label} section {section_id}: {row['title']}",
-            )
-        return {
-            "document": row["document"],
-            "section_id": row["section_id"],
-            "title": row["title"],
-            "content": row["content"],
-        }

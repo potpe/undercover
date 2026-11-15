@@ -29,10 +29,8 @@ from backend.database import (
     initialize_database,
     list_claims,
     list_handlers,
-    read_document_section,
     record_model_call,
     record_work_period,
-    search_document,
 )
 from backend.evaluations import (
     create_evaluation,
@@ -54,10 +52,6 @@ from backend.models import (
     CreateRunRequest,
     DecisionRequest,
     DispatchRequest,
-    DocumentSearchRequest,
-    DocumentSectionContent,
-    DocumentSectionRequest,
-    DocumentSectionSummary,
     EvaluationRecord,
     EvaluationRequest,
     FailureRequest,
@@ -345,8 +339,6 @@ def agent_openapi() -> dict[str, Any]:
         "get_claim",
         "get_policy",
         "get_claim_history",
-        "search_documents",
-        "read_section",
         "calculate_payout",
         "record_decision",
         "pay_claim",
@@ -671,40 +663,6 @@ def activity(claim_id: str, request: ActivityRequest) -> ClaimBundle:
     return claim(claim_id)
 
 
-@app.post(
-    "/api/claims/{claim_id}/document-search",
-    operation_id="search_documents",
-    dependencies=[Depends(agent_key)],
-)
-def document_search(
-    claim_id: str, request: DocumentSearchRequest
-) -> list[DocumentSectionSummary]:
-    """Search policy or manual sections relevant to a claim."""
-    if get_claim_bundle(claim_id) is None:
-        raise HTTPException(status_code=404, detail="Claim not found")
-    return [
-        DocumentSectionSummary(**section)
-        for section in search_document(request.document, request.query)
-    ]
-
-
-@app.post(
-    "/api/claims/{claim_id}/document-section",
-    operation_id="read_section",
-    dependencies=[Depends(agent_key)],
-)
-def document_section(
-    claim_id: str, request: DocumentSectionRequest
-) -> DocumentSectionContent:
-    """Read and record one policy or manual section for a claim."""
-    if get_claim_bundle(claim_id) is None:
-        raise HTTPException(status_code=404, detail="Claim not found")
-    section = read_document_section(claim_id, request.document, request.section_id)
-    if section is None:
-        raise HTTPException(status_code=404, detail="Document section not found")
-    return DocumentSectionContent(**section)
-
-
 @app.get(
     "/api/agent/instructions",
     operation_id="get_agent_instructions",
@@ -723,6 +681,16 @@ def agent_instructions() -> Instructions:
 def handlers() -> list[dict[str, Any]]:
     """List the claims handlers."""
     return list_handlers()
+
+
+@app.api_route(
+    "/api/{path:path}",
+    methods=["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS", "HEAD"],
+    include_in_schema=False,
+)
+def unknown_api_route(path: str) -> JSONResponse:
+    """Return a JSON not-found response for unmatched API routes."""
+    return JSONResponse(status_code=404, content={"detail": "Not Found"})
 
 
 register_dashboard_fallback(app, DASHBOARD_DIST)

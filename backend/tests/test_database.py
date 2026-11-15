@@ -1,8 +1,18 @@
+from pathlib import Path
+
+import yaml
+from sqlalchemy import select
+
 from backend.database import (
     add_activity,
+    connect,
     create_db_engine,
+    documents_table,
     initialize_database,
+    load_json,
+    plans_table,
     reseed_database,
+    settings_table,
 )
 
 
@@ -62,6 +72,52 @@ def test_normal_initialization_preserves_existing_work(client):
     assert client.get("/api/claims/CLM-1001").json()["decision"]["decision"] == (
         "decline"
     )
+
+
+def test_context_plans_add_ons_deductible_rules_and_documents_are_seeded(client):
+    plan_source = yaml.safe_load(Path("context/plans.yaml").read_text())
+    with connect() as connection:
+        plans = {
+            row["plan"]: row["data"]
+            for row in connection.execute(select(plans_table)).mappings()
+        }
+        settings = {
+            row["key"]: row["data"]
+            for row in connection.execute(select(settings_table)).mappings()
+        }
+        documents = {
+            row["document"]: row
+            for row in connection.execute(select(documents_table)).mappings()
+        }
+
+    assert plans == {plan["plan"]: plan for plan in plan_source["plans"]}
+    assert settings["add_ons"] == plan_source["add_ons"]
+    assert settings["deductible_applies_to"] == plan_source["deductible_applies_to"]
+    assert settings["company"] == load_json("company.json")
+    assert set(documents) == {"policy_wording", "claims_manual"}
+    for name, filename, version, system, owner in (
+        (
+            "policy_wording",
+            "policy_wording.md",
+            "2026.1",
+            "Published policy documents",
+            "Legal",
+        ),
+        (
+            "claims_manual",
+            "claims_manual.md",
+            "2026.2",
+            "Claims operations",
+            "Head of claims operations",
+        ),
+    ):
+        source_text = (Path("context") / filename).read_text()
+        source_body = source_text.split("---", 2)[2].lstrip("\n")
+        document = documents[name]
+        assert document["version"] == version
+        assert document["source"]["system"] == system
+        assert document["source"]["owner"] == owner
+        assert document["content"] == source_body
 
 
 def test_postgres_engine_uses_schema_and_bounded_pool(monkeypatch):

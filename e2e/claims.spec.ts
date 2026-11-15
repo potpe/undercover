@@ -1,6 +1,6 @@
 import { expect, test } from "@playwright/test";
 import { signIn } from "./auth";
-import { agentHeaders, handlerHeaders } from "./api";
+import { agentHeaders, handlerHeaders, mockClaimDocumentReads } from "./api";
 
 test.beforeEach(async ({ page }) => {
   await signIn(page);
@@ -291,20 +291,12 @@ test("the dashboard shows dispatch claims, record summary and sections read", as
   await page.route("**/api/dispatches/current", (route) =>
     route.fulfill({ json: run }),
   );
-  await request.post(
-    "http://127.0.0.1:8000/api/claims/CLM-1001/document-section",
-    {
-      data: { document: "claims_manual", section_id: "10" },
-      headers: agentHeaders,
-    },
+  const [retiredSection, retiredSearch] = await mockClaimDocumentReads(
+    page,
+    request,
   );
-  await request.post(
-    "http://127.0.0.1:8000/api/claims/CLM-1001/document-section",
-    {
-      data: { document: "policy_wording", section_id: "3" },
-      headers: agentHeaders,
-    },
-  );
+  expect(retiredSection.status()).toBe(404);
+  expect(retiredSearch.status()).toBe(404);
 
   await page.goto("/");
   await expect(

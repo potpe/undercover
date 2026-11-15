@@ -4,8 +4,9 @@ import socket
 from inspect import Parameter, Signature
 from threading import Event, Thread
 from types import SimpleNamespace
-from typing import Any, Literal, TypeGuard, cast, get_args
+from typing import Any, TypeGuard, cast, get_args
 
+import httpx
 import pytest
 import uvicorn
 from fastapi.testclient import TestClient
@@ -33,17 +34,55 @@ def test_claim_tools_are_scoped_and_decision_maker_is_injected(monkeypatch):
         "get_claim",
         "get_policy",
         "get_claim_history",
-        "search_documents",
-        "read_section",
         "calculate_payout",
         "record_decision",
+        "lookup_term",
+        "describe_fields",
+        "get_plan",
+        "get_claim_rules",
+        "search_reference_data",
+        "search_documents",
+        "read_section",
     }
+    assert {
+        "get_claim",
+        "get_policy",
+        "get_claim_history",
+        "calculate_payout",
+        "record_decision",
+        "pay_claim",
+    } == tools.APP_OPERATIONS
+    assert {
+        "lookup_term",
+        "describe_fields",
+        "get_plan",
+        "get_claim_rules",
+        "search_reference_data",
+        "search_documents",
+        "read_section",
+    } == tools.CONTEXT_OPERATIONS
     for name in ("get_claim", "get_policy", "get_claim_history"):
         assert schemas[name] == {}
     assert "claim_id" not in schemas["calculate_payout"]
     assert "claim_id" not in schemas["record_decision"]
     assert "decided_by" not in schemas["record_decision"]
     assert "pay_claim" not in schemas
+    assert schemas["lookup_term"] == {"term": {"title": "Term", "type": "string"}}
+    assert schemas["describe_fields"] == {
+        "record": {"title": "Record", "type": "string"}
+    }
+    assert schemas["get_plan"] == {"plan": {"title": "Plan", "type": "string"}}
+    assert schemas["get_claim_rules"] == {}
+    assert schemas["search_reference_data"] == {
+        "query": {"title": "Query", "type": "string"}
+    }
+    assert schemas["search_documents"] == {
+        "query": {"title": "Query", "type": "string"}
+    }
+    assert schemas["read_section"] == {
+        "document": {"title": "Document", "type": "string"},
+        "number": {"title": "Number", "type": "integer"},
+    }
     payout_tool = next(item for item in tool_list if item.name == "calculate_payout")
     payout_schema = payout_tool.args_schema
     assert is_pydantic_schema(payout_schema)
@@ -382,10 +421,14 @@ def test_context_rejects_untrusted_ids_in_all_tool_schemas(monkeypatch):
         assert is_pydantic_schema(selected_schema)
         schema = selected_schema.model_json_schema()
         assert schema.get("additionalProperties") is False
+        assert set(schema.get("required", [])) == set(schema.get("properties", {}))
         assert {"claim_id", "policy_id", "customer_id"}.isdisjoint(
             schema.get("properties", {})
         )
         assert "decided_by" not in schema.get("properties", {})
+        if selected_tool.name in tools.CONTEXT_OPERATIONS:
+            assert selected_tool.description
+            assert "\n" not in selected_tool.description
 
 
 def is_pydantic_schema(value: object) -> TypeGuard[type[BaseModel]]:
@@ -395,6 +438,7 @@ def is_pydantic_schema(value: object) -> TypeGuard[type[BaseModel]]:
 def streamable_test_server(claim_bundle: dict[str, Any]):
     server = FastMCP("undercover-app")
     refusal_enabled = [False]
+    context_refusal_enabled = [False]
     decision_calls = []
 
     @server.tool(name="undercover-app___get_claim", structured_output=True)
@@ -413,32 +457,6 @@ def streamable_test_server(claim_bundle: dict[str, Any]):
     @server.tool(name="undercover-app___get_claim_history")
     def get_claim_history(customer_id: str) -> list[dict[str, str]]:
         return [{"customer_id": customer_id, "claim_id": "CLM-0999"}]
-
-    @server.tool(name="undercover-app___search_documents")
-    def search_documents(
-        claim_id: str, document: Literal["policy_wording", "claims_manual"], query: str
-    ) -> list[dict[str, str]]:
-        return [
-            {
-                "claim_id": claim_id,
-                "document": document,
-                "query": query,
-                "section_id": "3",
-            }
-        ]
-
-    @server.tool(name="undercover-app___read_section")
-    def read_section(
-        claim_id: str,
-        document: Literal["policy_wording", "claims_manual"],
-        section_id: str,
-    ) -> dict[str, str]:
-        return {
-            "claim_id": claim_id,
-            "document": document,
-            "section_id": section_id,
-            "text": "coverage",
-        }
 
     @server.tool(name="undercover-app___calculate_payout")
     def calculate_payout(
@@ -503,14 +521,91 @@ def streamable_test_server(claim_bundle: dict[str, Any]):
     def pay_claim(claim_id: str, amount: float) -> dict[str, Any]:
         return {"claim_id": claim_id, "paid": amount}
 
-    return server, refusal_enabled, decision_calls
+    add_context_tools(server, "", context_refusal_enabled)
+    add_context_tools(server, "undercover-context___", context_refusal_enabled)
+
+    return server, refusal_enabled, context_refusal_enabled, decision_calls
+
+
+def add_context_tools(
+    server: FastMCP, prefix: str, refusal_enabled: list[bool]
+) -> None:
+    source = {
+        "file": "claims_manual.md",
+        "system": "Claims manual",
+        "owner": "Claims Operations",
+        "reviewed": "2026-01-01",
+    }
+
+    def envelope(answer: Any) -> dict[str, Any]:
+        return {"answer": answer, "sources": [source]}
+
+    @server.tool(name=f"{prefix}lookup_term")
+    def lookup_term(term: str) -> dict[str, Any]:
+        """Look up a defined term and its provenance."""
+        if refusal_enabled[0]:
+            raise ValueError("context refused this term")
+        return envelope({"term": term, "definition": "A stand-in definition."})
+
+    @server.tool(name=f"{prefix}describe_fields")
+    def describe_fields(record: str) -> dict[str, Any]:
+        """Describe the fields in a business record."""
+        return envelope({"record": record, "fields": ["claim_id", "status"]})
+
+    @server.tool(name=f"{prefix}get_plan")
+    def get_plan(plan: str) -> dict[str, Any]:
+        """Get a plan's benefits, deductibles and add-ons."""
+        return envelope({"plan": plan, "deductible": 50, "benefits": [], "add_ons": []})
+
+    @server.tool(name=f"{prefix}get_claim_rules")
+    def get_claim_rules() -> dict[str, Any]:
+        """Get the claims rules and their provenance."""
+        return envelope({"rules": ["Apply the policy wording."]})
+
+    @server.tool(name=f"{prefix}search_reference_data")
+    def search_reference_data(query: str) -> dict[str, Any]:
+        """Search reference data for a query."""
+        return envelope([{"query": query, "topic": "claims"}])
+
+    @server.tool(name=f"{prefix}search_documents")
+    def search_documents(query: str) -> dict[str, Any]:
+        """Search policy wording and claims manual documents."""
+        result_source = {
+            **source,
+            "document": "claims_manual",
+            "section_id": "10",
+            "title": "Meals",
+            "snippet": f"Reference to {query}; $35 per traveler.",
+        }
+        return {
+            "answer": [{"source": result_source}],
+            "sources": [source],
+        }
+
+    @server.tool(name=f"{prefix}read_section")
+    def read_section(document: str, number: int) -> dict[str, Any]:
+        """Read a numbered policy wording or claims manual section."""
+        return envelope(
+            {
+                "document": document,
+                "section_id": str(number),
+                "title": "Meals",
+                "content": "$35 per traveler",
+                "source": source,
+            }
+        )
 
 
 def test_real_streamable_http_gateway_tools_and_refusal_distinction(
     client, monkeypatch
 ):
     claim_bundle = client.get("/api/claims/CLM-1001").json()
-    server, refusal_enabled, decision_calls = streamable_test_server(claim_bundle)
+    (
+        server,
+        refusal_enabled,
+        context_refusal_enabled,
+        decision_calls,
+    ) = streamable_test_server(claim_bundle)
     app = server.streamable_http_app()
     sock = socket.socket()
     sock.bind(("127.0.0.1", 0))
@@ -529,8 +624,14 @@ def test_real_streamable_http_gateway_tools_and_refusal_distinction(
     try:
         assert ready.wait(5), "Streamable HTTP test server did not become ready"
         monkeypatch.setenv("UNDERCOVER_GATEWAY_URL", f"http://127.0.0.1:{port}/mcp")
+        monkeypatch.setenv("UNDERCOVER_CONTEXT", f"http://127.0.0.1:{port}/mcp")
         monkeypatch.setattr(gateway, "signed_auth", lambda: None)
-        monkeypatch.setattr(tools, "log_activity", lambda *_args: None)
+        logged_activity = []
+        monkeypatch.setattr(
+            tools,
+            "log_activity",
+            lambda _claim_id, message: logged_activity.append(message),
+        )
 
         def test_backend() -> TestClient:
             return TestClient(
@@ -558,8 +659,12 @@ def test_real_streamable_http_gateway_tools_and_refusal_distinction(
         assert_model_tool_schemas_match(direct_tools, local_tools)
         assert_streamable_claim_parity(direct_tools, local_tools, remote, claim_bundle)
         assert_gateway_read_tools(local_tools)
+        assert_context_tool_routes(direct_tools, local_tools)
         assert_gateway_payout_tool(local_tools)
         assert_gateway_decision_tool(local_tools, accepted_decisions, decision_calls)
+        assert_context_refusal_routes(
+            direct_tools, local_tools, context_refusal_enabled, logged_activity
+        )
         assert gateway.pay_gateway("CLM-1001", 120)["paid"] == 120
         assert_app_refusal(local_tools, refusal_enabled)
     finally:
@@ -611,17 +716,72 @@ def tool_schema(tool: BaseTool) -> dict[str, Any]:
 def assert_gateway_read_tools(gateway_tools: dict[str, BaseTool]) -> None:
     assert gateway_tools["get_policy"].invoke({})["policy_id"] == "POL-2001"
     assert "CUS-3001" in str(gateway_tools["get_claim_history"].invoke({}))
-    assert "section_id" in str(
-        gateway_tools["search_documents"].invoke(
-            {"document": "policy_wording", "query": "delay"}
-        )
-    )
+
+
+def assert_context_tool_routes(
+    direct_tools: dict[str, BaseTool],
+    gateway_tools: dict[str, BaseTool],
+) -> None:
+    invocations = {
+        "lookup_term": {"term": "benefit"},
+        "describe_fields": {"record": "claim"},
+        "get_plan": {"plan": "Premium"},
+        "get_claim_rules": {},
+        "search_reference_data": {"query": "trip delay"},
+        "search_documents": {"query": "meal receipt"},
+        "read_section": {"document": "claims_manual", "number": 10},
+    }
+    for name, arguments in invocations.items():
+        direct_result = direct_tools[name].invoke(arguments)
+        gateway_result = gateway_tools[name].invoke(arguments)
+        assert direct_result == gateway_result
+        assert set(direct_result) == {"answer", "sources"}
+        assert set(direct_result["sources"][0]) == {
+            "file",
+            "system",
+            "owner",
+            "reviewed",
+        }
+    document_results = gateway_tools["search_documents"].invoke(
+        {"query": "meal receipt"}
+    )["answer"]
+    assert document_results[0]["source"]["file"] == "claims_manual.md"
+    assert document_results[0]["source"]["document"] == "claims_manual"
+    section = gateway_tools["read_section"].invoke(
+        {"document": "claims_manual", "number": 10}
+    )["answer"]
+    assert section == {
+        "document": "claims_manual",
+        "section_id": "10",
+        "title": "Meals",
+        "content": "$35 per traveler",
+        "source": {
+            "file": "claims_manual.md",
+            "system": "Claims manual",
+            "owner": "Claims Operations",
+            "reviewed": "2026-01-01",
+        },
+    }
+
+
+def assert_context_refusal_routes(
+    direct_tools: dict[str, BaseTool],
+    gateway_tools: dict[str, BaseTool],
+    refusal_enabled: list[bool],
+    logged_activity: list[str],
+) -> None:
+    refusal_enabled[0] = True
+    for route_tools in (direct_tools, gateway_tools):
+        with pytest.raises(ToolException, match="context refused this term"):
+            route_tools["lookup_term"].invoke({"term": "blocked"})
     assert (
-        gateway_tools["read_section"].invoke(
-            {"document": "policy_wording", "section_id": "3"}
-        )["text"]
-        == "coverage"
+        sum(
+            "Context refusal:" in message and "context refused this term" in message
+            for message in logged_activity
+        )
+        == 2
     )
+    assert not any("Gateway refusal" in message for message in logged_activity)
 
 
 def assert_gateway_payout_tool(gateway_tools: dict[str, BaseTool]) -> None:
@@ -704,6 +864,41 @@ def test_gateway_transport_error_is_not_classified_as_app_refusal(monkeypatch):
     with pytest.raises(ToolException, match="Gateway unavailable") as caught:
         tools._invoke_gateway(tool, context, "get_policy", {})
     assert gateway.is_gateway_tool_refusal(caught.value) is False
+
+
+def test_context_transport_failures_are_not_misreported_as_refusals(monkeypatch):
+    context = context_fixture("CLM-1001")
+    logged_activity = []
+    monkeypatch.setattr(
+        tools,
+        "log_activity",
+        lambda _claim_id, message: logged_activity.append(message),
+    )
+
+    def fail_transport(*_args):
+        raise httpx.ConnectError("context endpoint is unavailable")
+
+    monkeypatch.setattr(tools, "invoke_gateway_tool", fail_transport)
+    with pytest.raises(httpx.ConnectError, match="context endpoint is unavailable"):
+        tools._invoke_gateway(
+            SimpleNamespace(name="undercover-context___lookup_term"),
+            context,
+            "lookup_term",
+            {"term": "benefit"},
+        )
+
+    monkeypatch.setattr(
+        direct.DirectRoute,
+        "invoke_context_tool",
+        lambda *_args: fail_transport(),
+    )
+    monkeypatch.setattr(tools, "gateway_tools", lambda: [])
+    local_tool = next(
+        item for item in tools.route_tools(context) if item.name == "lookup_term"
+    )
+    with pytest.raises(httpx.ConnectError, match="context endpoint is unavailable"):
+        local_tool.invoke({"term": "benefit"})
+    assert logged_activity == []
 
 
 def context_fixture(claim_id: str, configuration_version: int = 1) -> ClaimContext:
