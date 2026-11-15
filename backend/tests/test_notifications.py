@@ -11,6 +11,7 @@ def test_signoff_pays_atomically_without_contacting_agent_service(client, monkey
             "payout": 3750,
             "reason": "The injury is covered. The deductible produces this payout.",
             "policy_section": "Section 7: Emergency Medical; Section 10: Payment",
+            "decided_by": "UnderCover Agent",
         },
     )
     assert decided.status_code == 200

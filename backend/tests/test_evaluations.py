@@ -49,6 +49,7 @@ def decide(claim_id, kind, payout):
             payout=payout,
             reason="The agent's reason is grounded in the claim and policy wording.",
             policy_section="Section 3: Trip Delay; Section 10: Payment",
+            decided_by="UnderCover Agent",
         ),
     )
 

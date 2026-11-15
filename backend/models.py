@@ -2,7 +2,7 @@ from collections.abc import Sequence
 from datetime import datetime
 from typing import Any, Literal
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 
 ClaimStatus = Literal[
     "waiting", "in_progress", "waiting_for_sign_off", "decided", "left_for_handler"
@@ -64,6 +64,7 @@ class Decision(BaseModel):
     payout: float
     reason: str
     policy_section: str
+    decided_by: str
 
 
 class DecisionRequest(BaseModel):
@@ -71,10 +72,22 @@ class DecisionRequest(BaseModel):
     payout: float = Field(ge=0)
     reason: str = Field(min_length=1)
     policy_section: str = Field(min_length=1)
+    decided_by: str
 
 
 class PaymentRequest(BaseModel):
     amount: float = Field(gt=0)
+
+
+class GatewayHoldRequest(BaseModel):
+    reason: str
+
+    @field_validator("reason")
+    @classmethod
+    def reason_must_not_be_blank(cls, value: str) -> str:
+        if not value.strip():
+            raise ValueError("Reason must not be blank")
+        return value.strip()
 
 
 class Handler(BaseModel):
@@ -468,6 +481,9 @@ class ClaimBundle(BaseModel):
     work_run_id: int | None
     failed_attempts: int
     evaluation_run_id: int | None
+    sign_off_required: bool
+    gateway_refused: bool
+    gateway_refusal_reason: str | None
     activity: list[Activity]
     documents_read: list[DocumentRead]
 

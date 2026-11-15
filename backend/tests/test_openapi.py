@@ -58,6 +58,11 @@ def test_agent_openapi_is_generated_filtered_and_credential_free(client):
     assert payment_schema["required"] == ["amount"]
     amount = payment_schema["properties"]["amount"]
     assert amount["type"] == "number"
+    assert "/api/internal/claims/{claim_id}/gateway-hold" in root_schema["paths"]
+    assert all(
+        path != "/api/internal/claims/{claim_id}/gateway-hold"
+        for path in schema["paths"]
+    )
 
 
 def test_agent_openapi_requires_agent_key_or_handler(client):

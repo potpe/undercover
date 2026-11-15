@@ -14,6 +14,7 @@ def test_reseed_restores_the_queue_and_clears_all_work(client):
             "payout": 0,
             "reason": "The wording excludes this loss. The cited section applies.",
             "policy_section": "Section 9: General exclusions",
+            "decided_by": "UnderCover Agent",
         },
     )
     add_activity("CLM-1001", "Extra work")
@@ -51,6 +52,7 @@ def test_normal_initialization_preserves_existing_work(client):
             "payout": 0,
             "reason": "The wording excludes this loss. The cited section applies.",
             "policy_section": "Section 9: General exclusions",
+            "decided_by": "UnderCover Agent",
         },
     )
     assert response.status_code == 200

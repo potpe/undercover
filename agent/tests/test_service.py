@@ -8,7 +8,7 @@ from langchain_core.exceptions import ModelRateLimitError
 from langchain_core.messages import AIMessage
 from sqlalchemy import update
 
-from agent import dispatcher, main, service
+from agent import api, direct, dispatcher, main, service, tools
 from backend import main as backend_main
 from backend.database import claims_table, connect
 from backend.models import DecisionRequest, DispatchRequest, PaymentRequest
@@ -16,16 +16,16 @@ from backend.workflow import record_decision, record_payment
 
 
 def use_backend(monkeypatch):
-    monkeypatch.setattr(
-        main,
-        "backend",
-        lambda: TestClient(
+    def test_backend():
+        return TestClient(
             backend_main.app,
-            headers={
-                "X-API-Key": "undercover-e2e-agent-key-32-characters",
-            },
-        ),
-    )
+            headers={"X-API-Key": "undercover-e2e-agent-key-32-characters"},
+        )
+
+    monkeypatch.setattr(main, "backend", test_backend)
+    monkeypatch.setattr(api, "backend", test_backend)
+    monkeypatch.setattr(direct, "backend", test_backend)
+    monkeypatch.setattr(tools, "gateway_tools", lambda: [])
     monkeypatch.setattr(
         service,
         "backend",
@@ -98,6 +98,7 @@ def approve(claim_id, payout=420):
                 "The evidence supports approval and the backend calculated this payout."
             ),
             policy_section="Section 3: Trip Delay; Section 10: Payment",
+            decided_by="UnderCover Agent (configuration version 1)",
         ),
     )
     record_payment(claim_id, PaymentRequest(amount=payout))
@@ -269,6 +270,7 @@ def test_second_failure_leaves_one_claim_without_stopping_peer(client, monkeypat
                 payout=0,
                 reason="The policy wording excludes this loss.",
                 policy_section="Section 9: General exclusions",
+                decided_by="UnderCover Agent (configuration version 1)",
             ),
         )
         return f"{claim_id}: decline $0.00"
@@ -297,6 +299,7 @@ def test_dispatch_skips_claim_already_resuming_after_signoff(client, monkeypatch
             "payout": 3750,
             "reason": "The injury is covered. The deductible produces this payout.",
             "policy_section": "Section 7: Emergency Medical; Section 10: Payment",
+            "decided_by": "UnderCover Agent (configuration version 1)",
         },
     )
     client.post("/api/claims/CLM-1003/sign-off", json={"handler_id": "HND-01"})
@@ -326,40 +329,37 @@ def test_signoff_resumes_held_claim_through_service_and_pays_once(client, monkey
     only_claims("CLM-1003")
     run_id = create_dispatch(client)
 
-    class StructuredStub:
-        def invoke(self, messages):
-            return {
-                "raw": AIMessage(content=""),
-                "parsed": DecisionRequest(
-                    decision="approve",
-                    payout=3750,
-                    reason=(
-                        "The injury is covered. The deductible produces this payout."
-                    ),
-                    policy_section="Section 7: Emergency Medical; Section 10: Payment",
-                ),
-                "parsing_error": None,
-            }
-
     class StubModel:
         model_name = "stub-model"
         reasoning_effort = "low"
 
         def __init__(self, _configuration=None):
-            self.replies = iter(
-                [
-                    AIMessage(content="Emergency treatment is covered."),
-                ]
-            )
+            self.model_config = _configuration
 
         def invoke(self, messages):
-            return next(self.replies)
+            return AIMessage(
+                content="",
+                tool_calls=[
+                    {
+                        "name": "record_decision",
+                        "args": {
+                            "decision": "approve",
+                            "payout": 3750,
+                            "reason": (
+                                "The injury is covered. The deductible produces "
+                                "this payout."
+                            ),
+                            "policy_section": (
+                                "Section 7: Emergency Medical; Section 10: Payment"
+                            ),
+                        },
+                        "id": "decision",
+                    }
+                ],
+            )
 
         def bind_tools(self, tools, **kwargs):
             return self
-
-        def with_structured_output(self, schema, **kwargs):
-            return StructuredStub()
 
     monkeypatch.setattr(main, "model", StubModel)
     assert service.execute_stored_run(run_id) == "completed"

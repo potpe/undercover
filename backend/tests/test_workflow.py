@@ -3,23 +3,43 @@ from sqlalchemy import select
 from sqlalchemy.dialects import postgresql
 
 from backend import workflow
-from backend.database import claims_table
+from backend.database import claims_table, connect, settings_table
 
 
-def decide(client, claim_id="CLM-1001", decision="approve", payout=420.0):
+def decide(
+    client,
+    claim_id="CLM-1001",
+    decision="approve",
+    payout=420.0,
+    decided_by="UnderCover Agent",
+):
+    request = {
+        "decision": decision,
+        "payout": payout,
+        "reason": "The loss is covered. The policy wording supports this decision.",
+        "policy_section": "Section 3: Trip Delay",
+    }
+    request["decided_by"] = decided_by
     return client.post(
         f"/api/claims/{claim_id}/decision",
-        json={
-            "decision": decision,
-            "payout": payout,
-            "reason": "The loss is covered. The policy wording supports this decision.",
-            "policy_section": "Section 3: Trip Delay",
-        },
+        json=request,
     )
 
 
 def pay(client, amount=420.0, claim_id="CLM-1001"):
     return client.post(f"/api/claims/{claim_id}/payment", json={"amount": amount})
+
+
+def set_approval_limit(amount):
+    with connect() as connection:
+        company = connection.execute(
+            select(settings_table.c.data).where(settings_table.c.key == "company")
+        ).scalar_one()
+        connection.execute(
+            settings_table.update()
+            .where(settings_table.c.key == "company")
+            .values(data={**company, "payout_approval_limit": amount})
+        )
 
 
 def test_small_approval_is_decided_only_after_payment(client):
@@ -33,6 +53,47 @@ def test_small_approval_is_decided_only_after_payment(client):
     assert payment.status_code == 200
     assert payment.json()["claim"]["status"] == "decided"
     assert payment.json()["paid_amount"] == 420.0
+
+
+def test_decision_api_persists_supplied_configuration_maker(client):
+    response = decide(
+        client,
+        decided_by="UnderCover Agent (configuration version 7)",
+    )
+
+    assert response.status_code == 200
+    assert response.json()["decision"]["decided_by"] == (
+        "UnderCover Agent (configuration version 7)"
+    )
+    assert (
+        client.get("/api/claims/CLM-1001").json()["decision"]["decided_by"]
+        == "UnderCover Agent (configuration version 7)"
+    )
+
+
+def test_decision_api_persists_security_check_maker(client):
+    response = decide(
+        client,
+        decision="refer",
+        payout=0.0,
+        decided_by="Security check",
+    )
+
+    assert response.status_code == 200
+    assert response.json()["decision"]["decided_by"] == "Security check"
+
+
+def test_decision_replay_compares_maker(client):
+    original = decide(client)
+    assert original.status_code == 200
+    replay = decide(client, decided_by="UnderCover Agent (configuration version 2)")
+
+    assert replay.status_code == 409
+    assert replay.json()["detail"] == "Claim already has a decision"
+    assert (
+        client.get("/api/claims/CLM-1001").json()["decision"]["decided_by"]
+        == "UnderCover Agent"
+    )
 
 
 @pytest.mark.parametrize("decision", ["decline", "refer"])
@@ -97,6 +158,153 @@ def test_signoff_and_payment_roll_back_together_on_payment_failure(client, monke
     assert after["paid_amount"] is None
     assert after["paid_at"] is None
     assert after["claim"]["status"] == "waiting_for_sign_off"
+
+
+def test_gateway_hold_and_handler_signoff_pay_atomically_once(client):
+    set_approval_limit(5000)
+    approved = decide(client, claim_id="CLM-1003", payout=3750.0)
+    assert approved.json()["claim"]["status"] == "in_progress"
+
+    held = client.post(
+        "/api/internal/claims/CLM-1003/gateway-hold",
+        json={"reason": "Gateway rejected the payment request"},
+    )
+    assert held.status_code == 200
+    assert held.json()["claim"]["status"] == "waiting_for_sign_off"
+    assert held.json()["gateway_refused"] is True
+    assert held.json()["sign_off_required"] is True
+    assert (
+        held.json()["gateway_refusal_reason"] == "Gateway rejected the payment request"
+    )
+    assert held.json()["paid_amount"] is None
+
+    signed = client.post("/api/claims/CLM-1003/sign-off", json={"handler_id": "HND-01"})
+    repeated = client.post(
+        "/api/claims/CLM-1003/sign-off", json={"handler_id": "HND-01"}
+    )
+    assert signed.status_code == repeated.status_code == 200
+    assert signed.json()["paid_amount"] == repeated.json()["paid_amount"] == 3750.0
+    assert signed.json()["claim"]["status"] == "decided"
+    messages = [entry["message"] for entry in repeated.json()["activity"]]
+    assert messages.count("Payment signed off by Dana Whitfield") == 1
+    assert messages.count("Payment recorded: $3,750.00") == 1
+
+
+@pytest.mark.parametrize(
+    ("claim_id", "decision", "payout", "paid"),
+    [
+        ("CLM-1001", None, None, False),
+        ("CLM-1001", "decline", 0.0, False),
+        ("CLM-1001", "approve", 420.0, True),
+    ],
+)
+def test_gateway_hold_rejects_invalid_claim_transitions(
+    client, claim_id, decision, payout, paid
+):
+    if decision is not None:
+        decide(client, claim_id=claim_id, decision=decision, payout=payout)
+    if paid:
+        pay(client, claim_id=claim_id)
+
+    response = client.post(
+        f"/api/internal/claims/{claim_id}/gateway-hold",
+        json={"reason": "Gateway refused payment"},
+    )
+
+    assert response.status_code == 409
+    bundle = client.get(f"/api/claims/{claim_id}").json()
+    assert bundle["gateway_refused"] is False
+    assert bundle["gateway_refusal_reason"] is None
+
+
+def test_gateway_hold_rejects_already_held_app_approval_without_overwriting_cause(
+    client,
+):
+    decide(client, claim_id="CLM-1003", payout=3750.0)
+    before = client.get("/api/claims/CLM-1003").json()
+    assert before["claim"]["status"] == "waiting_for_sign_off"
+    assert before["sign_off_required"] is True
+    assert before["gateway_refused"] is False
+    assert before["gateway_refusal_reason"] is None
+
+    response = client.post(
+        "/api/internal/claims/CLM-1003/gateway-hold",
+        json={"reason": "Gateway refused payment"},
+    )
+
+    assert response.status_code == 409
+    after = client.get("/api/claims/CLM-1003").json()
+    assert after["claim"]["status"] == "waiting_for_sign_off"
+    assert after["sign_off_required"] is True
+    assert after["gateway_refused"] is False
+    assert after["gateway_refusal_reason"] is None
+
+
+def test_gateway_hold_returns_not_found_for_unknown_claim(client):
+    response = client.post(
+        "/api/internal/claims/CLM-9999/gateway-hold",
+        json={"reason": "Gateway refused payment"},
+    )
+
+    assert response.status_code == 404
+
+
+def test_gateway_hold_rejects_in_progress_claim_without_approval(client):
+    started = client.post(
+        "/api/internal/claims/CLM-1001/work", json={"thread_id": "hold-test"}
+    )
+    assert started.status_code == 200
+
+    response = client.post(
+        "/api/internal/claims/CLM-1001/gateway-hold",
+        json={"reason": "Gateway refused payment"},
+    )
+
+    assert response.status_code == 409
+    bundle = client.get("/api/claims/CLM-1001").json()
+    assert bundle["claim"]["status"] == "in_progress"
+    assert bundle["decision"] is None
+    assert bundle["gateway_refused"] is False
+
+
+def test_gateway_hold_rejects_referred_claim(client):
+    decide(client, decision="refer", payout=0.0)
+
+    response = client.post(
+        "/api/internal/claims/CLM-1001/gateway-hold",
+        json={"reason": "Gateway refused payment"},
+    )
+
+    assert response.status_code == 409
+    bundle = client.get("/api/claims/CLM-1001").json()
+    assert bundle["claim"]["status"] == "decided"
+    assert bundle["gateway_refused"] is False
+    assert bundle["gateway_refusal_reason"] is None
+
+
+@pytest.mark.parametrize("reason", ["", "   "])
+def test_gateway_hold_requires_nonblank_reason(client, reason):
+    decide(client, claim_id="CLM-1003", payout=3750.0)
+
+    response = client.post(
+        "/api/internal/claims/CLM-1003/gateway-hold", json={"reason": reason}
+    )
+
+    assert response.status_code == 422
+    assert client.get("/api/claims/CLM-1003").json()["gateway_refused"] is False
+
+
+def test_gateway_hold_requires_agent_key_even_for_handler(client):
+    decide(client, claim_id="CLM-1003", payout=3750.0)
+    client.headers.pop("X-API-Key")
+
+    response = client.post(
+        "/api/internal/claims/CLM-1003/gateway-hold",
+        json={"reason": "Gateway refused payment"},
+    )
+
+    assert response.status_code == 401
+    assert client.get("/api/claims/CLM-1003").json()["gateway_refused"] is False
 
 
 def test_exactly_one_thousand_dollars_does_not_need_sign_off(client):

@@ -54,6 +54,7 @@ claims_table = Table(
     Column("payout", Numeric),
     Column("reason", Text),
     Column("policy_section", Text),
+    Column("decided_by", String),
     Column("signed_off_by", String),
     Column("paid_amount", Numeric),
     Column("agent_thread_id", String),
@@ -62,6 +63,8 @@ claims_table = Table(
     Column("evaluation_run_id", Integer),
     Column("sign_off_required", Boolean, nullable=False, default=False),
     Column("approval_limit", Numeric),
+    Column("gateway_refused", Boolean, nullable=False, default=False),
+    Column("gateway_refusal_reason", Text),
     Column("signed_off_at", DateTime(timezone=True)),
     Column("paid_at", DateTime(timezone=True)),
 )
@@ -681,6 +684,7 @@ def get_claim_bundle(claim_id: str) -> dict[str, Any] | None:
             "payout": float(row["payout"]),
             "reason": row["reason"],
             "policy_section": row["policy_section"],
+            "decided_by": row["decided_by"],
         }
     return {
         "claim": claim,
@@ -700,6 +704,9 @@ def get_claim_bundle(claim_id: str) -> dict[str, Any] | None:
         "work_run_id": row["work_run_id"],
         "failed_attempts": row["failed_attempts"],
         "evaluation_run_id": row["evaluation_run_id"],
+        "sign_off_required": row["sign_off_required"],
+        "gateway_refused": row["gateway_refused"],
+        "gateway_refusal_reason": row["gateway_refusal_reason"],
         "activity": [
             {
                 "id": activity["id"],

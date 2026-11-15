@@ -1,24 +1,28 @@
 """The durable UnderCover claim graph and its backend tools."""
 
-import json
 import os
 from datetime import UTC, datetime
 from time import perf_counter
-from typing import Annotated, Any, Literal, TypedDict, cast
+from typing import Annotated, Any, Literal, TypedDict
 
 import httpx
 from langchain_core.messages import AnyMessage, HumanMessage, SystemMessage
 from langchain_core.runnables import RunnableConfig
-from langchain_core.tools import tool
+from langchain_core.tools import ToolException, tool
 from langchain_openai import ChatOpenAI
 from langgraph.checkpoint.base import BaseCheckpointSaver
 from langgraph.graph import END, START, StateGraph
 from langgraph.graph.message import add_messages
 from langgraph.prebuilt import ToolNode
 from langgraph.types import Command, interrupt
+from mcp.shared.exceptions import McpError
 from pydantic import BaseModel, Field, SecretStr
 
+from agent import api as agent_api
 from agent.checkpoints import claim_checkpointer
+from agent.claim_context import ClaimContext
+from agent.gateway import pay_gateway
+from agent.tools import canonical_security_claim, route_tools
 from agent.tracing import trace_claim
 from backend.models import (
     Benefit,
@@ -78,9 +82,7 @@ class ClaimState(TypedDict):
 
 def backend() -> httpx.Client:
     """Return a client for the UnderCover backend."""
-    key = os.getenv("UNDERCOVER_API_KEY")
-    headers = {"X-API-Key": key} if key else {}
-    return httpx.Client(base_url=BACKEND_URL, timeout=120, headers=headers)
+    return agent_api.backend()
 
 
 def log_activity(claim_id: str, message: str) -> None:
@@ -281,12 +283,8 @@ def screen_claim(
 ) -> dict[str, Any]:
     """Screen the complete claim before it reaches the claim model."""
     bundle = current_bundle(state["claim_id"])
-    prompt = (
-        "# Policy record\n\n"
-        f"{json.dumps(bundle['policy'], indent=2)}\n\n"
-        "# Claim\n\n"
-        f"{json.dumps(bundle['claim'], indent=2)}"
-    )
+    claim_text = canonical_security_claim(bundle)
+    prompt = f"# Policy and claim evidence\n\n{claim_text}"
     result: Screening | None = None
     for _ in range(MAX_SCREEN_ATTEMPTS):
         check_model_budget(state)
@@ -312,6 +310,7 @@ def screen_claim(
                 payout=0,
                 reason=result.reason,
                 policy_section="Security check",
+                decided_by="Security check",
             ),
         )
         return {
@@ -333,13 +332,13 @@ def route_after_screen(state: ClaimState) -> str:
 def route_after_agent(state: ClaimState) -> str:
     if getattr(state["messages"][-1], "tool_calls", []):
         return "tools"
-    if state.get("model_calls", 0) >= MAX_MODEL_CALLS:
-        return END
-    return "decide"
+    raise RuntimeError("Claim model stopped without recording a decision")
 
 
 def route_after_tools(state: ClaimState) -> str:
-    return END if state.get("model_calls", 0) >= MAX_MODEL_CALLS else "agent"
+    if state.get("model_calls", 0) >= MAX_MODEL_CALLS:
+        raise RuntimeError("Model-call limit reached before a decision was recorded")
+    return "agent"
 
 
 def route_after_decision(state: ClaimState) -> str:
@@ -352,75 +351,72 @@ def route_after_decision(state: ClaimState) -> str:
     return END
 
 
-def build_claim_graph(
-    selected_model: Any,
-    instructions: str,
-    checkpointer: BaseCheckpointSaver,
-    checker: Any,
-):
-    system_message = SystemMessage(instructions)
-    model_with_tools = selected_model.bind_tools(
-        [read_claim, search_documents, read_document_section, calculate_payout]
-    )
-    decider = selected_model.with_structured_output(DecisionRequest, include_raw=True)
-    structured_checker = checker.with_structured_output(Screening, include_raw=True)
-    tools = ToolNode(
-        [read_claim, search_documents, read_document_section, calculate_payout]
-    )
+def route_after_payment(state: ClaimState) -> str:
+    return "approval" if state["claim_status"] == "waiting_for_sign_off" else END
 
+
+def route_after_tool_node(state: ClaimState) -> str:
+    if state.get("decision") is not None:
+        return route_after_decision(state)
+    return route_after_tools(state)
+
+
+def make_screen_node(checker: Any, structured_checker: Any):
     def screen(state: ClaimState) -> dict[str, Any]:
         return screen_claim(state, checker, structured_checker)
 
+    return screen
+
+
+def make_agent_node(selected_model: Any, model_with_tools: Any, system_message: Any):
     def agent(state: ClaimState) -> dict[str, Any]:
         check_model_budget(state)
         if state.get("model_calls", 0) == 0:
             log_activity(state["claim_id"], f"Using model {selected_model.model_name}")
         response = model_with_tools.invoke([system_message, *state["messages"]])
         save_model_usage(state, selected_model, response)
+        if not getattr(response, "tool_calls", []):
+            if state.get("model_calls", 0) + 1 >= MAX_MODEL_CALLS:
+                raise RuntimeError(
+                    "Model-call limit reached before a decision was recorded"
+                )
+            raise RuntimeError("Claim model stopped without recording a decision")
         return {
             "messages": [response],
             "model_calls": state.get("model_calls", 0) + 1,
         }
 
-    def decide(state: ClaimState) -> dict[str, Any]:
-        check_model_budget(state)
-        structured = decider.invoke(
-            [
-                system_message,
-                *state["messages"],
-                HumanMessage("Record your decision on this claim."),
-            ]
+    return agent
+
+
+def make_tools_node(tool_node: ToolNode, accepted: dict[str, Any]):
+    def run_tools(state: ClaimState) -> dict[str, Any]:
+        accepted.clear()
+        result = tool_node.invoke(state)
+        if not accepted:
+            return result
+        payload = accepted["payload"]
+        bundle = accepted["bundle"]
+        status = bundle["claim"]["status"]
+        summary = (
+            f"{state['claim_id']}: {payload['decision']} ${payload['payout']:,.2f}"
         )
-        save_model_usage(state, selected_model, structured["raw"])
-        result = structured["parsed"]
-        log_activity(
-            state["claim_id"],
-            f"Decision prepared: {result.decision} for ${result.payout:,.2f}",
-        )
+        if status == "waiting_for_sign_off":
+            summary += "; waiting for sign-off"
         return {
-            "decision": result.decision,
-            "payout": result.payout,
-            "reason": result.reason,
-            "policy_section": result.policy_section,
-            "model_calls": state.get("model_calls", 0) + 1,
+            **result,
+            "decision": payload["decision"],
+            "payout": payload["payout"],
+            "reason": payload["reason"],
+            "policy_section": payload["policy_section"],
+            "claim_status": status,
+            "result": summary,
         }
 
-    def record_decision(state: ClaimState) -> dict[str, Any]:
-        bundle = save_decision(
-            state["claim_id"],
-            DecisionRequest(
-                decision=cast(DecisionKind, state["decision"]),
-                payout=state["payout"],
-                reason=state["reason"],
-                policy_section=state["policy_section"],
-            ),
-        )
-        status = bundle["claim"]["status"]
-        result = f"{state['claim_id']}: {state['decision']} ${state['payout']:,.2f}"
-        if status == "waiting_for_sign_off":
-            result += "; waiting for sign-off"
-        return {"claim_status": status, "result": result}
+    return run_tools
 
+
+def make_approval_node():
     def approval(state: ClaimState) -> dict[str, Any]:
         answer = interrupt({"claim_id": state["claim_id"], "payout": state["payout"]})
         bundle = current_bundle(state["claim_id"])
@@ -435,8 +431,45 @@ def build_claim_graph(
             ),
         }
 
+    return approval
+
+
+def make_payment_node(gateway_enabled: bool):
     def pay(state: ClaimState) -> dict[str, Any]:
-        save_payment(state["claim_id"], state["payout"])
+        bundle = current_bundle(state["claim_id"])
+        paid_amount = bundle.get("paid_amount")
+        if paid_amount is not None:
+            return {
+                "claim_status": bundle["claim"]["status"],
+                "result": (
+                    f"{state['claim_id']}: approve ${paid_amount:,.2f}; "
+                    "payment recorded"
+                ),
+            }
+        if bundle.get("gateway_refused"):
+            return {
+                "claim_status": bundle["claim"]["status"],
+                "result": (
+                    f"{state['claim_id']}: approve ${state['payout']:,.2f}; "
+                    "waiting for sign-off after Gateway refusal"
+                ),
+            }
+        if gateway_enabled:
+            try:
+                pay_gateway(state["claim_id"], state["payout"])
+            except McpError as error:
+                reason = str(error)
+                agent_api.log_activity(state["claim_id"], f"Gateway refusal: {reason}")
+                agent_api.hold_gateway_refusal(state["claim_id"], reason)
+                return {
+                    "claim_status": "waiting_for_sign_off",
+                    "result": (
+                        f"{state['claim_id']}: approve ${state['payout']:,.2f}; "
+                        "waiting for sign-off after Gateway refusal"
+                    ),
+                }
+        else:
+            save_payment(state["claim_id"], state["payout"])
         return {
             "claim_status": "decided",
             "result": (
@@ -445,24 +478,53 @@ def build_claim_graph(
             ),
         }
 
+    return pay
+
+
+def build_claim_graph(
+    selected_model: Any,
+    instructions: str,
+    checkpointer: BaseCheckpointSaver,
+    checker: Any,
+    claim_context: ClaimContext,
+) -> Any:
+    system_message = SystemMessage(instructions)
+    accepted: dict[str, Any] = {}
+
+    def decision_accepted(payload: dict[str, Any], bundle: dict[str, Any]) -> None:
+        accepted.update(payload=payload, bundle=bundle)
+
+    gateway_enabled = bool(os.getenv("UNDERCOVER_GATEWAY_URL"))
+    model_tools = route_tools(
+        claim_context,
+        "gateway" if gateway_enabled else "direct",
+        on_decision=decision_accepted,
+    )
+    model_with_tools = selected_model.bind_tools(model_tools)
+    structured_checker = checker.with_structured_output(Screening, include_raw=True)
+    tool_node = ToolNode(model_tools, handle_tool_errors=(ToolException,))
+    screen = make_screen_node(checker, structured_checker)
+    agent = make_agent_node(selected_model, model_with_tools, system_message)
+    tools = make_tools_node(tool_node, accepted)
+    approval = make_approval_node()
+    pay = make_payment_node(gateway_enabled)
+
     builder = StateGraph(ClaimState)
     builder.add_node("screen", screen)
     builder.add_node("agent", agent)
     builder.add_node("tools", tools)
-    builder.add_node("decide", decide)
-    builder.add_node("record_decision", record_decision)
     builder.add_node("approval", approval)
     builder.add_node("pay", pay)
     builder.add_conditional_edges("screen", route_after_screen, ["agent", END])
     builder.add_edge(START, "screen")
-    builder.add_conditional_edges("agent", route_after_agent, ["tools", "decide", END])
-    builder.add_conditional_edges("tools", route_after_tools, ["agent", END])
-    builder.add_edge("decide", "record_decision")
+    builder.add_conditional_edges("agent", route_after_agent, ["tools", END])
     builder.add_conditional_edges(
-        "record_decision", route_after_decision, ["approval", "pay", END]
+        "tools",
+        route_after_tool_node,
+        ["approval", "pay", "agent", END],
     )
     builder.add_edge("approval", END)
-    builder.add_edge("pay", END)
+    builder.add_conditional_edges("pay", route_after_payment, ["approval", END])
     return builder.compile(checkpointer=checkpointer)
 
 
@@ -518,13 +580,24 @@ def run_with_context(
 ) -> str:
     """Start or continue one claim on its durable thread."""
     configuration = run_configuration(claim_id, run_id)
+    bundle = current_bundle(claim_id)
     if run_id is None:
-        run_id = current_bundle(claim_id).get("work_run_id")
+        run_id = bundle.get("work_run_id")
+    claim_context = ClaimContext.from_bundle(
+        claim_id,
+        bundle,
+        int(configuration["version"]),
+        run_kind,
+    )
     selected_model = model(configuration)
     checker = screening_model(configuration)
     with claim_checkpointer() as checkpointer:
         graph = build_claim_graph(
-            selected_model, configuration["instructions"], checkpointer, checker
+            selected_model,
+            configuration["instructions"],
+            checkpointer,
+            checker,
+            claim_context,
         )
         config = claim_config(thread_id, [], run_id, run_kind)
         tags = version_tags(configuration, run_id, run_kind)

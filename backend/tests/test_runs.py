@@ -45,6 +45,7 @@ def decide(claim_id, kind: DecisionKind = "approve", payout=420):
                 "The evidence supports this decision under the cited policy wording."
             ),
             policy_section="Section 3: Trip Delay; Section 10: Payment",
+            decided_by="UnderCover Agent",
         ),
     )
 

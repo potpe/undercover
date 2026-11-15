@@ -39,12 +39,27 @@ def test_seeding_creates_configuration_and_recipe_version_one(client):
 def test_claim_configuration_contains_no_scores_or_handler_decisions(client):
     response = client.get("/api/agent/configuration/current")
     assert response.status_code == 200
-    assert set(response.json()) == {
+    configuration = response.json()
+    assert set(configuration) == {
         "version",
         "instructions",
         "model_name",
         "reasoning_effort",
     }
+    instructions = configuration["instructions"]
+    for tool in (
+        "get_claim",
+        "get_policy",
+        "get_claim_history",
+        "calculate_payout",
+        "search_documents",
+        "read_section",
+        "record_decision",
+    ):
+        assert f"`{tool}`" in instructions
+    assert "If `record_decision` refuses" in instructions
+    assert "Payment is graph-only" in instructions
+    assert "you have no decision or payment tool" not in instructions
 
 
 def test_diff_uses_difflib_additions_and_removals():

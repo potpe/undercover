@@ -1,0 +1,720 @@
+import asyncio
+import json
+import socket
+from inspect import Parameter, Signature
+from threading import Event, Thread
+from types import SimpleNamespace
+from typing import Any, Literal, TypeGuard, cast, get_args
+
+import pytest
+import uvicorn
+from fastapi.testclient import TestClient
+from langchain_core.messages import ToolCall, ToolMessage
+from langchain_core.tools import BaseTool, ToolException
+from mcp.server.fastmcp import FastMCP
+from mcp.shared.exceptions import McpError
+from mcp.types import CallToolResult, ErrorData
+from pydantic import BaseModel
+
+from agent import api, direct, gateway, tools
+from agent.claim_context import ClaimContext
+from agent.mcp_sync import run_mcp
+from backend.main import app as backend_app
+from backend.main import handler
+from backend.models import Benefit, DecisionKind, PayoutLine
+
+
+def test_claim_tools_are_scoped_and_decision_maker_is_injected(monkeypatch):
+    monkeypatch.setattr(tools, "gateway_tools", lambda: [])
+    tool_list = tools.route_tools(context_fixture("CLM-1001", 7))
+    schemas = {item.name: item.args for item in tool_list}
+
+    assert set(schemas) == {
+        "get_claim",
+        "get_policy",
+        "get_claim_history",
+        "search_documents",
+        "read_section",
+        "calculate_payout",
+        "record_decision",
+    }
+    for name in ("get_claim", "get_policy", "get_claim_history"):
+        assert schemas[name] == {}
+    assert "claim_id" not in schemas["calculate_payout"]
+    assert "claim_id" not in schemas["record_decision"]
+    assert "decided_by" not in schemas["record_decision"]
+    assert "pay_claim" not in schemas
+    payout_tool = next(item for item in tool_list if item.name == "calculate_payout")
+    payout_schema = payout_tool.args_schema
+    assert is_pydantic_schema(payout_schema)
+    lines_field = payout_schema.model_fields.get("lines")
+    assert lines_field is not None
+    line_types = get_args(lines_field.annotation)
+    assert line_types
+    assert isinstance(line_types[0], type)
+    assert issubclass(line_types[0], PayoutLine)
+
+
+def test_gateway_tool_surface_is_local_and_prefixed_remote_ids_are_injected(
+    monkeypatch,
+):
+    calls = []
+
+    async def invoke(call):
+        calls.append(call["args"])
+        return ToolMessage(
+            content='{"payout":10}',
+            artifact={"structured_content": {"payout": 10}},
+            tool_call_id=call["id"],
+            name=call["name"],
+        )
+
+    remote_tool = SimpleNamespace(
+        name="undercover-app___calculate_payout",
+        ainvoke=invoke,
+    )
+    monkeypatch.setattr(tools, "gateway_tools", lambda: [remote_tool])
+    route_tool_list = tools.route_tools(
+        context_fixture("CLM-1002", 7),
+        "gateway",
+    )
+    payout = next(item for item in route_tool_list if item.name == "calculate_payout")
+
+    result = payout.invoke(
+        {
+            "benefit": "emergency_medical",
+            "lines": [],
+            "paid_by_others": 0,
+        }
+    )
+
+    assert result == {"payout": 10}
+    assert calls == [
+        {
+            "claim_id": "CLM-1002",
+            "benefit": "emergency_medical",
+            "lines": [],
+            "paid_by_others": 0,
+        }
+    ]
+
+
+def test_sigv4_auth_signs_for_agentcore_with_frozen_credentials(monkeypatch):
+    signatures = []
+
+    class Credentials:
+        access_key = "access"
+        secret_key = "s" * 32
+        token = "t" * 32
+
+    class Signer:
+        def __init__(self, credentials, service, region):
+            signatures.append((credentials, service, region))
+
+        def add_auth(self, request):
+            request.headers["Authorization"] = "AWS4 signed"
+
+    monkeypatch.setattr(gateway, "SigV4Auth", Signer)
+    auth = gateway.SigV4HTTPAuth(Credentials(), "us-west-2")
+    request = next(
+        auth.auth_flow(
+            __import__("httpx").Request("POST", "https://gateway.example/mcp")
+        )
+    )
+
+    assert request.headers["Authorization"] == "AWS4 signed"
+    assert signatures == [(auth.credentials, "bedrock-agentcore", "us-west-2")]
+
+
+def test_signer_uses_the_cli_session_frozen_credentials_and_region(monkeypatch):
+    frozen = object()
+    used = []
+
+    class Credentials:
+        freeze_calls = 0
+
+        def get_frozen_credentials(self):
+            self.freeze_calls += 1
+            return frozen
+
+    credentials = Credentials()
+
+    class Session:
+        region_name = "eu-west-1"
+
+        def get_credentials(self):
+            return credentials
+
+    session = Session()
+    monkeypatch.setattr(gateway.boto3, "Session", lambda: session)
+
+    class Signer:
+        def __init__(self, selected, service, region):
+            used.append((selected, service, region))
+
+        def add_auth(self, request):
+            request.headers["Authorization"] = "signed"
+
+    monkeypatch.setattr(gateway, "SigV4Auth", Signer)
+    auth = gateway.signed_auth()
+    requests = [
+        next(
+            auth.auth_flow(
+                __import__("httpx").Request(
+                    "POST", f"https://gateway.example/mcp/{request_id}"
+                )
+            )
+        )
+        for request_id in ("first", "second")
+    ]
+
+    assert auth.credentials is credentials
+    assert auth.region == "eu-west-1"
+    assert credentials.freeze_calls == 2
+    assert used == [
+        (frozen, "bedrock-agentcore", "eu-west-1"),
+        (frozen, "bedrock-agentcore", "eu-west-1"),
+    ]
+    assert all(request.headers["Authorization"] == "signed" for request in requests)
+
+
+def test_late_environment_settings_are_read_at_client_or_graph_creation(
+    monkeypatch,
+):
+    api_settings = {}
+
+    def build_http_client(**kwargs):
+        api_settings.update(kwargs)
+        return object()
+
+    monkeypatch.setattr(api.httpx, "Client", build_http_client)
+    monkeypatch.setenv("UNDERCOVER_API", "http://backend.test")
+    monkeypatch.setenv("UNDERCOVER_API_KEY", "late-loaded-key")
+    api.backend()
+    assert api_settings["base_url"] == "http://backend.test"
+    assert api_settings["headers"] == {"X-API-Key": "late-loaded-key"}
+
+    monkeypatch.setenv("UNDERCOVER_CONTEXT", "http://context.test/mcp")
+    assert direct.context_url() == "http://context.test/mcp"
+    monkeypatch.setenv("UNDERCOVER_MEMORY_ID", "memory-late")
+    context = ClaimContext.from_bundle(
+        "CLM-1001",
+        {
+            "claim": {
+                "policy_id": "POL-2001",
+                "customer_id": "CUS-3001",
+            }
+        },
+        configuration_version=3,
+        run_kind="dispatch",
+    )
+    assert context.context_url == "http://context.test/mcp"
+    assert context.memory_id == "memory-late"
+
+    remote_tool = object()
+    gateway_configuration = {}
+
+    class Client:
+        def __init__(self, configuration, **options):
+            gateway_configuration.update(
+                configuration=configuration,
+                options=options,
+            )
+
+        def get_tools(self):
+            return [remote_tool]
+
+    monkeypatch.setattr(gateway, "MultiServerMCPClient", Client)
+    monkeypatch.setattr(gateway, "signed_auth", lambda: "test-auth")
+    monkeypatch.setattr(gateway, "run_mcp", lambda result: result)
+    monkeypatch.setenv("UNDERCOVER_GATEWAY_URL", "http://gateway.test/mcp")
+    assert gateway.gateway_tools() == [remote_tool]
+    assert gateway_configuration["configuration"]["undercover-app"]["url"] == (
+        "http://gateway.test/mcp"
+    )
+
+
+def test_mcp_bridge_then_mangum_handler_in_same_process():
+    async def operation():
+        await asyncio.sleep(0)
+        return asyncio.get_running_loop().is_running()
+
+    assert run_mcp(operation()) is True
+    response = handler(
+        {
+            "version": "2.0",
+            "routeKey": "GET /health",
+            "rawPath": "/health",
+            "rawQueryString": "",
+            "headers": {"host": "localhost"},
+            "requestContext": {
+                "http": {
+                    "method": "GET",
+                    "path": "/health",
+                    "sourceIp": "127.0.0.1",
+                    "protocol": "HTTP/1.1",
+                }
+            },
+            "isBase64Encoded": False,
+        },
+        cast(Any, None),
+    )
+    assert response["statusCode"] == 200
+
+
+def test_canonical_claim_serialization_is_stable():
+    bundle = {
+        "policy": {"policy_id": "POL-2001"},
+        "claim": {
+            "claim_id": "CLM-1001",
+            "status": "in_progress",
+            "documents": [{"content": "full customer document"}],
+        },
+        "customer": {
+            "customer_id": "CUS-3001",
+            "previous_claims": [{"claim_id": "CLM-0999"}],
+        },
+        "plan": {"plan": "Premium", "benefits": [{"benefit": "trip_delay"}]},
+        "add_ons": [{"add_on": "adventure_sports", "limit": 500}],
+        "activity": [{"id": 1, "message": "read"}],
+        "decision": None,
+        "paid_amount": None,
+        "signed_off_by": None,
+    }
+    first = api.canonical_claim(bundle)
+    later = {
+        **bundle,
+        "claim": {**bundle["claim"], "status": "decided"},
+        "paid_amount": 420,
+        "signed_off_by": "HND-01",
+        "activity": [{"id": 2, "message": "decision recorded"}],
+        "decision": {"decision": "approve"},
+    }
+    assert api.canonical_claim(later) == first
+    assert "full customer document" in first
+    assert "CUS-3001" in first
+    assert "Premium" in first
+    assert "adventure_sports" in first
+
+
+def test_context_injects_policy_and_customer_ids_for_gateway_tools(monkeypatch):
+    calls = []
+
+    async def capture(call):
+        calls.append(call["args"])
+        return ToolMessage(
+            content="[]",
+            artifact={"structured_content": []},
+            tool_call_id=call["id"],
+            name=call["name"],
+        )
+
+    remote = [
+        SimpleNamespace(name="undercover-app___get_policy", ainvoke=capture),
+        SimpleNamespace(name="undercover-app___get_claim_history", ainvoke=capture),
+        SimpleNamespace(name="undercover-app___record_decision", ainvoke=capture),
+    ]
+    monkeypatch.setattr(tools, "gateway_tools", lambda: remote)
+    route_tool_list = tools.route_tools(
+        context_fixture("CLM-1002", 7),
+        "gateway",
+    )
+    next(item for item in route_tool_list if item.name == "get_policy").invoke({})
+    next(item for item in route_tool_list if item.name == "get_claim_history").invoke(
+        {}
+    )
+    next(item for item in route_tool_list if item.name == "record_decision").invoke(
+        {
+            "decision": "decline",
+            "payout": 0,
+            "reason": "Not covered.",
+            "policy_section": "Section 9",
+        }
+    )
+    assert calls == [
+        {"policy_id": "POL-2002"},
+        {"customer_id": "CUS-3002"},
+        {
+            "decision": "decline",
+            "payout": 0,
+            "reason": "Not covered.",
+            "policy_section": "Section 9",
+            "claim_id": "CLM-1002",
+            "decided_by": "UnderCover Agent (configuration version 7)",
+        },
+    ]
+
+
+def test_direct_route_injects_configured_decision_maker(monkeypatch):
+    captured = []
+
+    def record_decision(_self, payload):
+        captured.append(payload)
+        return {"decision": payload["decision"]}
+
+    monkeypatch.setattr(tools.DirectRoute, "record_decision", record_decision)
+    tool_list = tools.route_tools(context_fixture("CLM-1001"))
+    tool = next(item for item in tool_list if item.name == "record_decision")
+    tool.invoke(
+        {
+            "decision": "decline",
+            "payout": 0,
+            "reason": "Not covered.",
+            "policy_section": "Section 9",
+        }
+    )
+    assert captured == [
+        {
+            "decision": "decline",
+            "payout": 0,
+            "reason": "Not covered.",
+            "policy_section": "Section 9",
+            "decided_by": "UnderCover Agent (configuration version 1)",
+        }
+    ]
+
+
+def test_context_rejects_untrusted_ids_in_all_tool_schemas(monkeypatch):
+    monkeypatch.setattr(tools, "gateway_tools", lambda: [])
+    route_tool_list = tools.route_tools(context_fixture("CLM-1001"))
+    for selected_tool in route_tool_list:
+        selected_schema = selected_tool.args_schema
+        assert is_pydantic_schema(selected_schema)
+        schema = selected_schema.model_json_schema()
+        assert schema.get("additionalProperties") is False
+        assert {"claim_id", "policy_id", "customer_id"}.isdisjoint(
+            schema.get("properties", {})
+        )
+        assert "decided_by" not in schema.get("properties", {})
+
+
+def is_pydantic_schema(value: object) -> TypeGuard[type[BaseModel]]:
+    return isinstance(value, type) and issubclass(value, BaseModel)
+
+
+def streamable_test_server(claim_bundle: dict[str, Any]):
+    server = FastMCP("undercover-app")
+    refusal_enabled = [False]
+    decision_calls = []
+
+    @server.tool(name="undercover-app___get_claim", structured_output=True)
+    def get_claim(claim_id: str) -> dict[str, Any]:
+        return cast(
+            dict[str, Any],
+            CallToolResult(content=[], structuredContent=claim_bundle),
+        )
+
+    @server.tool(name="undercover-app___get_policy")
+    def get_policy(policy_id: str) -> dict[str, str]:
+        if refusal_enabled[0]:
+            raise ValueError("application refused")
+        return {"policy_id": policy_id}
+
+    @server.tool(name="undercover-app___get_claim_history")
+    def get_claim_history(customer_id: str) -> list[dict[str, str]]:
+        return [{"customer_id": customer_id, "claim_id": "CLM-0999"}]
+
+    @server.tool(name="undercover-app___search_documents")
+    def search_documents(
+        claim_id: str, document: Literal["policy_wording", "claims_manual"], query: str
+    ) -> list[dict[str, str]]:
+        return [
+            {
+                "claim_id": claim_id,
+                "document": document,
+                "query": query,
+                "section_id": "3",
+            }
+        ]
+
+    @server.tool(name="undercover-app___read_section")
+    def read_section(
+        claim_id: str,
+        document: Literal["policy_wording", "claims_manual"],
+        section_id: str,
+    ) -> dict[str, str]:
+        return {
+            "claim_id": claim_id,
+            "document": document,
+            "section_id": section_id,
+            "text": "coverage",
+        }
+
+    @server.tool(name="undercover-app___calculate_payout")
+    def calculate_payout(
+        claim_id: str,
+        benefit: Benefit,
+        lines: list[PayoutLine],
+        paid_by_others: float,
+    ) -> dict[str, Any]:
+        return {
+            "claim_id": claim_id,
+            "benefit": benefit,
+            "line_count": len(lines),
+            "paid_by_others": paid_by_others,
+            "payout": 120.0,
+        }
+
+    def record_decision(**arguments: Any) -> dict[str, Any]:
+        arguments = {
+            key: arguments[key]
+            for key in (
+                "claim_id",
+                "decision",
+                "payout",
+                "reason",
+                "policy_section",
+                "decided_by",
+            )
+        }
+        decision_calls.append(arguments)
+        claim_bundle["decision"] = {
+            key: value for key, value in arguments.items() if key != "claim_id"
+        }
+        claim_bundle["claim"]["status"] = "in_progress"
+        return cast(
+            dict[str, Any],
+            CallToolResult(content=[], structuredContent=claim_bundle),
+        )
+
+    record_decision_signature = Signature(
+        parameters=[
+            Parameter("claim_id", Parameter.POSITIONAL_OR_KEYWORD, annotation=str),
+            Parameter(
+                "decision", Parameter.POSITIONAL_OR_KEYWORD, annotation=DecisionKind
+            ),
+            Parameter("payout", Parameter.POSITIONAL_OR_KEYWORD, annotation=float),
+            Parameter("reason", Parameter.POSITIONAL_OR_KEYWORD, annotation=str),
+            Parameter(
+                "policy_section", Parameter.POSITIONAL_OR_KEYWORD, annotation=str
+            ),
+            Parameter("decided_by", Parameter.POSITIONAL_OR_KEYWORD, annotation=str),
+        ],
+        return_annotation=dict[str, Any],
+    )
+    record_decision.__signature__ = record_decision_signature
+    server.add_tool(
+        record_decision,
+        name="undercover-app___record_decision",
+        structured_output=True,
+    )
+
+    @server.tool(name="undercover-app___pay_claim")
+    def pay_claim(claim_id: str, amount: float) -> dict[str, Any]:
+        return {"claim_id": claim_id, "paid": amount}
+
+    return server, refusal_enabled, decision_calls
+
+
+def test_real_streamable_http_gateway_tools_and_refusal_distinction(
+    client, monkeypatch
+):
+    claim_bundle = client.get("/api/claims/CLM-1001").json()
+    server, refusal_enabled, decision_calls = streamable_test_server(claim_bundle)
+    app = server.streamable_http_app()
+    sock = socket.socket()
+    sock.bind(("127.0.0.1", 0))
+    port = sock.getsockname()[1]
+    ready = Event()
+
+    class ReadyServer(uvicorn.Server):
+        async def startup(self, sockets: list[socket.socket] | None = None) -> None:
+            await super().startup(sockets=sockets)
+            ready.set()
+
+    config = uvicorn.Config(app, log_level="error")
+    asgi_server = ReadyServer(config)
+    thread = Thread(target=asgi_server.run, kwargs={"sockets": [sock]}, daemon=True)
+    thread.start()
+    try:
+        assert ready.wait(5), "Streamable HTTP test server did not become ready"
+        monkeypatch.setenv("UNDERCOVER_GATEWAY_URL", f"http://127.0.0.1:{port}/mcp")
+        monkeypatch.setattr(gateway, "signed_auth", lambda: None)
+        monkeypatch.setattr(tools, "log_activity", lambda *_args: None)
+
+        def test_backend() -> TestClient:
+            return TestClient(
+                backend_app,
+                headers={"X-API-Key": "undercover-e2e-agent-key-32-characters"},
+            )
+
+        monkeypatch.setattr(api, "backend", test_backend)
+        monkeypatch.setattr(direct, "backend", test_backend)
+        remote = gateway.gateway_tools()
+        monkeypatch.setattr(tools, "gateway_tools", lambda: remote)
+        context = context_fixture("CLM-1001")
+        accepted_decisions = []
+        gateway_tools = tools.route_tools(
+            context,
+            "gateway",
+            on_decision=lambda payload, bundle: accepted_decisions.append(
+                (payload, bundle)
+            ),
+        )
+        local_tools = {item.name: item for item in gateway_tools}
+        direct_tools = {
+            item.name: item for item in tools.route_tools(context, "direct")
+        }
+        assert_model_tool_schemas_match(direct_tools, local_tools)
+        assert_streamable_claim_parity(direct_tools, local_tools, remote, claim_bundle)
+        assert_gateway_read_tools(local_tools)
+        assert_gateway_payout_tool(local_tools)
+        assert_gateway_decision_tool(local_tools, accepted_decisions, decision_calls)
+        assert gateway.pay_gateway("CLM-1001", 120)["paid"] == 120
+        assert_app_refusal(local_tools, refusal_enabled)
+    finally:
+        asgi_server.should_exit = True
+        thread.join(timeout=5)
+        sock.close()
+
+
+def assert_streamable_claim_parity(
+    direct_tools: dict[str, BaseTool],
+    gateway_tools: dict[str, BaseTool],
+    remote: list[Any],
+    bundle: dict[str, Any],
+) -> None:
+    assert gateway_tools["get_claim"].invoke({}) == direct_tools["get_claim"].invoke({})
+    claim_tool = next(
+        item for item in remote if item.name == "undercover-app___get_claim"
+    )
+    call: ToolCall = {
+        "name": claim_tool.name,
+        "args": {"claim_id": "CLM-1001"},
+        "id": "structured-claim",
+        "type": "tool_call",
+    }
+    result = run_mcp(claim_tool.ainvoke(call))
+    assert isinstance(result, ToolMessage)
+    assert result.content == []
+    assert result.artifact["structured_content"] == bundle
+
+
+def assert_model_tool_schemas_match(
+    direct_tools: dict[str, BaseTool],
+    gateway_tools: dict[str, BaseTool],
+) -> None:
+    assert direct_tools.keys() == gateway_tools.keys()
+    assert {name: tool_schema(tool) for name, tool in direct_tools.items()} == {
+        name: tool_schema(tool) for name, tool in gateway_tools.items()
+    }
+
+
+def tool_schema(tool: BaseTool) -> dict[str, Any]:
+    schema = tool.args_schema
+    if is_pydantic_schema(schema):
+        return schema.model_json_schema()
+    assert isinstance(schema, dict)
+    return schema
+
+
+def assert_gateway_read_tools(gateway_tools: dict[str, BaseTool]) -> None:
+    assert gateway_tools["get_policy"].invoke({})["policy_id"] == "POL-2001"
+    assert "CUS-3001" in str(gateway_tools["get_claim_history"].invoke({}))
+    assert "section_id" in str(
+        gateway_tools["search_documents"].invoke(
+            {"document": "policy_wording", "query": "delay"}
+        )
+    )
+    assert (
+        gateway_tools["read_section"].invoke(
+            {"document": "policy_wording", "section_id": "3"}
+        )["text"]
+        == "coverage"
+    )
+
+
+def assert_gateway_payout_tool(gateway_tools: dict[str, BaseTool]) -> None:
+    response = gateway_tools["calculate_payout"].invoke(
+        {
+            "benefit": "trip_delay",
+            "lines": [
+                {
+                    "description": "Hotel",
+                    "amount": 120,
+                    "quantity": 1,
+                    "kind": "hotel",
+                    "nights": 1,
+                    "hours": 0,
+                }
+            ],
+            "paid_by_others": 0,
+        }
+    )
+    assert response["payout"] == 120
+
+
+def assert_gateway_decision_tool(
+    gateway_tools: dict[str, BaseTool],
+    accepted_decisions: list[tuple[dict[str, Any], dict[str, Any]]],
+    decision_calls: list[dict[str, Any]],
+) -> None:
+    tool = gateway_tools["record_decision"]
+    properties = tool_schema(tool)["properties"]
+    assert set(properties) == {"decision", "payout", "reason", "policy_section"}
+    result = tool.invoke(
+        {
+            "decision": "approve",
+            "payout": 120,
+            "reason": "Covered by the policy.",
+            "policy_section": "Section 3",
+        }
+    )
+    accepted_bundle = accepted_decisions[-1][1]
+    assert json.loads(result) == accepted_bundle
+    assert accepted_bundle["claim"]["status"] == "in_progress"
+    assert accepted_bundle["decision"]["decision"] == "approve"
+    assert accepted_bundle["decision"]["decided_by"] == (
+        "UnderCover Agent (configuration version 1)"
+    )
+    assert accepted_decisions[-1][0] == {
+        "decision": "approve",
+        "payout": 120.0,
+        "reason": "Covered by the policy.",
+        "policy_section": "Section 3",
+    }
+    assert decision_calls[-1] == {
+        "claim_id": "CLM-1001",
+        "decision": "approve",
+        "payout": 120.0,
+        "reason": "Covered by the policy.",
+        "policy_section": "Section 3",
+        "decided_by": "UnderCover Agent (configuration version 1)",
+    }
+
+
+def assert_app_refusal(
+    gateway_tools: dict[str, BaseTool], refusal_enabled: list[bool]
+) -> None:
+    refusal_enabled[0] = True
+    with pytest.raises(ToolException, match="application refused") as app_error:
+        gateway_tools["get_policy"].invoke({})
+    assert gateway.is_gateway_tool_refusal(app_error.value)
+
+
+def test_gateway_transport_error_is_not_classified_as_app_refusal(monkeypatch):
+    context = context_fixture("CLM-1001")
+    tool = SimpleNamespace(name="undercover-app___get_policy")
+
+    def raise_gateway_error(*_args):
+        raise McpError(ErrorData(code=-32000, message="Gateway unavailable"))
+
+    monkeypatch.setattr(tools, "invoke_gateway_tool", raise_gateway_error)
+    monkeypatch.setattr(tools, "log_activity", lambda *_args: None)
+    with pytest.raises(ToolException, match="Gateway unavailable") as caught:
+        tools._invoke_gateway(tool, context, "get_policy", {})
+    assert gateway.is_gateway_tool_refusal(caught.value) is False
+
+
+def context_fixture(claim_id: str, configuration_version: int = 1) -> ClaimContext:
+    policy_id, customer_id = {
+        "CLM-1001": ("POL-2001", "CUS-3001"),
+        "CLM-1002": ("POL-2002", "CUS-3002"),
+    }[claim_id]
+    return ClaimContext(
+        claim_id,
+        policy_id,
+        customer_id,
+        configuration_version=configuration_version,
+        run_kind="dispatch",
+    )

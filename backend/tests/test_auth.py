@@ -163,6 +163,7 @@ def test_registered_api_routes_match_explicit_dependency_inventory():
         ("GET", "/api/rounds"): {"current_handler"},
         ("GET", "/api/claims"): {"agent_or_handler"},
         ("POST", "/api/internal/claims/{claim_id}/work"): {"agent_key"},
+        ("POST", "/api/internal/claims/{claim_id}/gateway-hold"): {"agent_key"},
         ("GET", "/api/claims/{claim_id}"): {"agent_or_handler"},
         ("GET", "/api/policies/{policy_id}"): {"agent_or_handler"},
         ("GET", "/api/customers/{customer_id}/history"): {"agent_or_handler"},
@@ -305,6 +306,7 @@ def test_signed_in_handler_and_over_limit_permission(client):
             "payout": 3750,
             "reason": "Emergency treatment is covered by this policy.",
             "policy_section": "Section 7; Section 10",
+            "decided_by": "UnderCover Agent",
         },
     )
     assert decided.json()["claim"]["status"] == "waiting_for_sign_off"

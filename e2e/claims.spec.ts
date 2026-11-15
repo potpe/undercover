@@ -81,6 +81,7 @@ test("a decided claim shows its payout, reason, policy and activity", async ({
       data: {
         decision: "approve",
         payout: 650,
+        decided_by: "Test handler",
         reason:
           "The lost baggage is covered by the policy. Eligible items less carrier compensation produce a $650.00 payout.",
         policy_section:
@@ -132,6 +133,7 @@ test("handler sign-off pays immediately without resuming the agent service", asy
       data: {
         decision: "approve",
         payout: 3750,
+        decided_by: "Test handler",
         reason:
           "The sudden wrist fracture required emergency treatment during the covered trip. The $3,800.00 bill less the $50.00 Premium deductible gives a $3,750.00 payout.",
         policy_section:
@@ -438,6 +440,7 @@ test("the scoreboard shows an API-played evaluation and linked copy", async ({
       data: {
         decision: "approve",
         payout: 3750,
+        decided_by: "Test handler",
         reason: "The test plays a held approval for the evaluation copy.",
         policy_section: "Section 7: Emergency Medical; Section 10: Payment",
       },

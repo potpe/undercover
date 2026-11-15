@@ -12,6 +12,12 @@ Agent-side backend requests require `UNDERCOVER_API_KEY` in `X-API-Key`. Shared 
 
 The UnderCover Agent works the queue the way a handler does. A dispatch covers every waiting claim and every claim left in progress, oldest submitted first, with up to N claim agents at once. Code chooses and tracks that work without a model. Each claim uses its own claim graph and thread, with no earlier claims in its context. A named waiting claim can also be run on its own without a dispatch.
 
+The claim model uses the same claim-scoped tools whether it reaches the app directly or through AgentCore Gateway. The model cannot supply claim, policy or customer ids for its reads/calculation, nor a decision maker; the graph supplies those from the current claim. The backend requires and persists `decided_by`: the agent supplies `UnderCover Agent (configuration version N)` and the screening referral supplies `Security check`. The model records a decision through a tool, but payment remains a graph operation. Bookkeeping, runs, versions, the improver, and the security check's claim read/referral continue to use the direct app route with the agent key. When configured, Gateway requests use AWS CLI credentials and region and SigV4 for `bedrock-agentcore`; otherwise app model tools use the direct API and its key.
+
+The security check and both app routes use the same canonical claim text. App and Gateway policy refusals, and context-tool refusals when those tools are added, reach the model as refusals, never as successful-looking answers. A Gateway payment refusal is recorded directly and moves an eligible approved, unpaid claim from `in_progress` to `waiting_for_sign_off`, storing `gateway_refused` and `gateway_refusal_reason`. The agent-key-only bookkeeping operation is `POST /api/internal/claims/{claim_id}/gateway-hold` with a required `reason`; it is not part of the agent OpenAPI document or Gateway. The claim bundle exposes the refusal fields. The existing handler sign-off records payment atomically; resuming the graph does not pay again. The sign-off explanation identifies a Gateway refusal rather than saying the app limit was exceeded.
+
+The agent reads `UNDERCOVER_API`, `UNDERCOVER_GATEWAY_URL`, `UNDERCOVER_CONTEXT` and `UNDERCOVER_MEMORY_ID` when constructing the applicable client or claim graph, not at module import, so late `.env` loading is honored. `UNDERCOVER_MEMORY_ID` is read for forward-compatible configuration but is unused until Phase 4. MCP operations remain synchronous to the graph: each short asynchronous MCP call runs on its own worker thread and event loop, without consuming or replacing the main thread's event loop.
+
 For each claim the graph should:
 
 - screen the complete customer-written claim for hidden instructions before the claim model sees it; refer flagged claims with zero payout, the check's reason and `Security check` as the section
@@ -50,7 +56,7 @@ Our goal is to handle claims straight through, as accurately as our handlers do.
 - Our handlers' own decisions on these claims are in `data/evals/`. We use them to check the agent's work. The agent must never see them.
 - Amounts are in US dollars.
 
-The generated `/api/agent/openapi.json` document contains exactly `get_claim`, `get_policy`, `get_claim_history`, `search_documents`, `read_section`, `calculate_payout`, `record_decision` and `pay_claim`. It accepts the key or handler sign-in, has no deployment address or key tool input, and excludes handler actions, runs, evaluations and improvement.
+The generated `/api/agent/openapi.json` document contains exactly `get_claim`, `get_policy`, `get_claim_history`, `search_documents`, `read_section`, `calculate_payout`, `record_decision` and `pay_claim`. It accepts the key or handler sign-in, has no deployment address or key tool input, and excludes handler actions, runs, evaluations and improvement. The Gateway-refusal hold operation is also excluded. In the agent's model surface, `pay_claim` is a graph operation, not a model tool.
 
 The backend can serve the built dashboard and API at one address as an ordinary web server or through a Lambda handler. Lambda invocation does not run startup seeding or write local files; Supabase holds the existing records. Laptop development remains supported, and this build creates no cloud resources.
 

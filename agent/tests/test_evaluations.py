@@ -2,27 +2,10 @@ import pytest
 from fastapi.testclient import TestClient
 from langchain_core.messages import AIMessage
 
-from agent import dispatcher, main, service
+from agent import api, direct, dispatcher, main, service, tools
 from backend import main as backend_main
 from backend.models import DecisionRequest
 from backend.workflow import record_decision
-
-
-class StructuredStub:
-    def __init__(self, payout):
-        self.payout = payout
-
-    def invoke(self, messages):
-        return {
-            "raw": AIMessage(content=""),
-            "parsed": DecisionRequest(
-                decision="approve",
-                payout=self.payout,
-                reason="The evidence supports approval under the cited policy wording.",
-                policy_section="Section 3: Trip Delay; Section 10: Payment",
-            ),
-            "parsing_error": None,
-        }
 
 
 class StubModel:
@@ -33,29 +16,40 @@ class StubModel:
         self.payout = payout
 
     def invoke(self, messages):
-        return AIMessage(content="The claim is covered")
+        return AIMessage(
+            content="",
+            tool_calls=[
+                {
+                    "name": "record_decision",
+                    "args": {
+                        "decision": "approve",
+                        "payout": self.payout,
+                        "reason": "The evidence supports approval under the policy.",
+                        "policy_section": "Section 3: Trip Delay; Section 10: Payment",
+                    },
+                    "id": "decision",
+                }
+            ],
+        )
 
     def bind_tools(self, tools, **kwargs):
         return self
-
-    def with_structured_output(self, schema, **kwargs):
-        return StructuredStub(self.payout)
 
 
 @pytest.mark.parametrize("payout", [420, 3750])
 def test_evaluation_uses_claim_graph_without_changing_queue_or_retaining_progress(
     client, monkeypatch, payout
 ):
-    monkeypatch.setattr(
-        main,
-        "backend",
-        lambda: TestClient(
+    def test_backend():
+        return TestClient(
             backend_main.app,
-            headers={
-                "X-API-Key": "undercover-e2e-agent-key-32-characters",
-            },
-        ),
-    )
+            headers={"X-API-Key": "undercover-e2e-agent-key-32-characters"},
+        )
+
+    monkeypatch.setattr(main, "backend", test_backend)
+    monkeypatch.setattr(api, "backend", test_backend)
+    monkeypatch.setattr(direct, "backend", test_backend)
+    monkeypatch.setattr(tools, "gateway_tools", lambda: [])
     monkeypatch.setattr(
         service,
         "backend",
@@ -174,6 +168,7 @@ def test_terminal_evaluation_error_also_clears_saved_progress(client, monkeypatc
                     payout=3750,
                     reason="The held decision was saved before the response was lost.",
                     policy_section="Section 7: Emergency Medical; Section 10: Payment",
+                    decided_by="UnderCover Agent (configuration version 1)",
                 ),
             )
             raise RuntimeError("Response lost after the held decision")
@@ -184,6 +179,7 @@ def test_terminal_evaluation_error_also_clears_saved_progress(client, monkeypatc
                 payout=0,
                 reason="The policy wording excludes this loss.",
                 policy_section="Section 9: General exclusions",
+                decided_by="UnderCover Agent (configuration version 1)",
             ),
         )
         return f"{claim_id}: decline $0.00"

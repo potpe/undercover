@@ -34,6 +34,7 @@ def decide(client, payout):
             "payout": payout,
             "reason": "The covered expenses support this approval.",
             "policy_section": "Section 3; Section 10",
+            "decided_by": "UnderCover Agent",
         },
     )
 
@@ -74,6 +75,7 @@ def test_settings_change_records_handler_and_applies_to_next_decision(client):
             "payout": 1500,
             "reason": "The covered expenses support this approval.",
             "policy_section": "Section 3; Section 10",
+            "decided_by": "UnderCover Agent",
         },
     )
     claim = client.get("/api/claims/CLM-1002").json()

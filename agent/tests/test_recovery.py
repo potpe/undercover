@@ -4,32 +4,19 @@ from fastapi.testclient import TestClient
 from langchain_core.messages import AIMessage
 from sqlalchemy import update
 
-from agent import dispatcher, main, service
+from agent import api, direct, dispatcher, main, service, tools
 from backend import main as backend_main
 from backend.database import claims_table, connect
 from backend.models import DecisionRequest, PaymentRequest
 from backend.workflow import record_decision, record_payment
 
 
-class StructuredStub:
-    def __init__(self, result):
-        self.result = result
-
-    def invoke(self, messages):
-        return {
-            "raw": AIMessage(content=""),
-            "parsed": self.result,
-            "parsing_error": None,
-        }
-
-
 class StubModel:
     model_name = "stub-model"
     reasoning_effort = "low"
 
-    def __init__(self, replies, result=None):
+    def __init__(self, replies):
         self.replies = iter(replies)
-        self.result = result
 
     def invoke(self, messages):
         reply = next(self.replies)
@@ -40,11 +27,10 @@ class StubModel:
     def bind_tools(self, tools, **kwargs):
         return self
 
-    def with_structured_output(self, schema, **kwargs):
-        return StructuredStub(self.result)
-
 
 def tool_call(call_id, name, args):
+    if name == "read_claim":
+        name, args = "get_claim", {}
     return AIMessage(
         content="", tool_calls=[{"name": name, "args": args, "id": call_id}]
     )
@@ -56,20 +42,29 @@ def approval(payout=420):
         payout=payout,
         reason="The delay is covered. The backend calculation gives this payout.",
         policy_section="Section 3: Trip Delay; Section 10: Payment",
+        decided_by="UnderCover Agent (configuration version 1)",
+    )
+
+
+def decision_call(payout=420):
+    return tool_call(
+        "decision",
+        "record_decision",
+        approval(payout).model_dump(exclude={"decided_by"}),
     )
 
 
 def use_backend(monkeypatch):
-    monkeypatch.setattr(
-        main,
-        "backend",
-        lambda: TestClient(
+    def test_backend():
+        return TestClient(
             backend_main.app,
-            headers={
-                "X-API-Key": "undercover-e2e-agent-key-32-characters",
-            },
-        ),
-    )
+            headers={"X-API-Key": "undercover-e2e-agent-key-32-characters"},
+        )
+
+    monkeypatch.setattr(main, "backend", test_backend)
+    monkeypatch.setattr(api, "backend", test_backend)
+    monkeypatch.setattr(direct, "backend", test_backend)
+    monkeypatch.setattr(tools, "gateway_tools", lambda: [])
     monkeypatch.setattr(
         service,
         "backend",
@@ -120,8 +115,7 @@ def test_interrupted_claim_resumes_same_step_thread_and_attempt(client, monkeypa
         [
             tool_call("read", "read_claim", {"claim_id": "CLM-1001"}),
             KeyboardInterrupt(),
-        ],
-        approval(),
+        ]
     )
     monkeypatch.setattr(main, "model", lambda _configuration: interrupted_model)
 
@@ -136,7 +130,7 @@ def test_interrupted_claim_resumes_same_step_thread_and_attempt(client, monkeypa
     assert stopped["failed_attempts"] == 0
     client.post("/api/internal/runs/stop-active")
 
-    resumed_model = StubModel([AIMessage(content="The claim is covered")], approval())
+    resumed_model = StubModel([decision_call()])
     monkeypatch.setattr(main, "model", lambda _configuration: resumed_model)
     next_id = create_one_claim_dispatch(client, "CLM-1001")
 
@@ -155,9 +149,7 @@ def test_interrupted_claim_resumes_same_step_thread_and_attempt(client, monkeypa
 def test_signoff_saved_while_agent_is_down_is_recovered(client, monkeypatch):
     use_backend(monkeypatch)
     run_id = create_one_claim_dispatch(client, "CLM-1003")
-    stub = StubModel(
-        [AIMessage(content="Emergency treatment is covered")], approval(3750)
-    )
+    stub = StubModel([decision_call(3750)])
     monkeypatch.setattr(main, "model", lambda _configuration: stub)
     assert service.execute_stored_run(run_id) == "completed"
 

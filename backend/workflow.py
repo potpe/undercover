@@ -12,7 +12,7 @@ from backend.database import (
     timestamp,
 )
 from backend.improvement_budget import check_run_connection
-from backend.models import DecisionRequest, PaymentRequest
+from backend.models import DecisionRequest, GatewayHoldRequest, PaymentRequest
 
 
 def money(amount: float) -> str:
@@ -60,6 +60,7 @@ def same_decision(row: RowMapping, request: DecisionRequest) -> bool:
         and float(row["payout"]) == request.payout
         and row["reason"] == request.reason
         and row["policy_section"] == request.policy_section
+        and row["decided_by"] == request.decided_by
     )
 
 
@@ -92,6 +93,7 @@ def record_decision(claim_id: str, request: DecisionRequest) -> None:
                 payout=request.payout,
                 reason=request.reason,
                 policy_section=request.policy_section,
+                decided_by=request.decided_by,
                 status=status,
                 sign_off_required=needs_sign_off,
                 approval_limit=current_limit,
@@ -150,6 +152,37 @@ def sign_off(claim_id: str, handler_id: str) -> None:
             claim_id,
             PaymentRequest(amount=float(row["payout"])),
             require_sign_off=True,
+        )
+
+
+def gateway_hold(claim_id: str, request: GatewayHoldRequest) -> None:
+    with connect() as connection:
+        row = claim_row(connection, claim_id)
+        if (
+            row["status"] != "in_progress"
+            or row["decision"] != "approve"
+            or row["paid_amount"] is not None
+        ):
+            reject(
+                connection,
+                claim_id,
+                "Only an approved, unpaid in-progress claim can be held",
+                action="Gateway hold",
+            )
+        connection.execute(
+            update(claims_table)
+            .where(claims_table.c.claim_id == claim_id)
+            .values(
+                status="waiting_for_sign_off",
+                sign_off_required=True,
+                gateway_refused=True,
+                gateway_refusal_reason=request.reason,
+            )
+        )
+        insert_activity(
+            connection,
+            claim_id,
+            f"Gateway payment refused: {request.reason}",
         )
 
 

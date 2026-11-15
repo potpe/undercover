@@ -61,6 +61,7 @@ from backend.models import (
     EvaluationRecord,
     EvaluationRequest,
     FailureRequest,
+    GatewayHoldRequest,
     Handler,
     Instructions,
     ModelCallRequest,
@@ -97,7 +98,13 @@ from backend.runs import (
     stop_run,
 )
 from backend.settings import get_settings, list_setting_changes, update_settings
-from backend.workflow import record_decision, record_payment, sign_off, start_run
+from backend.workflow import (
+    gateway_hold,
+    record_decision,
+    record_payment,
+    sign_off,
+    start_run,
+)
 
 
 @asynccontextmanager
@@ -275,6 +282,17 @@ def internal_start_named_work(claim_id: str, request: RunRequest) -> RunResponse
     """Start one named claim for the agent command line."""
     start_run(claim_id, request.thread_id)
     return RunResponse(claim_id=claim_id, status="in_progress")
+
+
+@app.post(
+    "/api/internal/claims/{claim_id}/gateway-hold",
+    operation_id="record_gateway_payment_hold",
+    dependencies=[Depends(agent_key)],
+)
+def internal_gateway_hold(claim_id: str, request: GatewayHoldRequest) -> ClaimBundle:
+    """Record a Gateway payment refusal and require handler sign-off."""
+    gateway_hold(claim_id, request)
+    return claim(claim_id)
 
 
 @app.get(
