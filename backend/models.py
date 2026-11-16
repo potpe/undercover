@@ -2,9 +2,16 @@ from __future__ import annotations
 
 from collections.abc import Sequence
 from datetime import datetime
-from typing import Any, Literal
+from typing import Annotated, Any, Literal
 
-from pydantic import BaseModel, Field, field_validator, model_validator
+from pydantic import (
+    BaseModel,
+    ConfigDict,
+    Field,
+    JsonValue,
+    field_validator,
+    model_validator,
+)
 
 ClaimStatus = Literal[
     "waiting", "in_progress", "waiting_for_sign_off", "decided", "left_for_handler"
@@ -458,20 +465,136 @@ class ActivityRequest(BaseModel):
     message: str = Field(min_length=1)
 
 
+class StepSource(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    file: str
+    system: str
+    owner: str
+    reviewed: str
+
+
+class ToolStepDetails(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    name: str
+    input: dict[str, JsonValue]
+
+
+class LookupStepDetails(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    operation: str
+    input: dict[str, JsonValue]
+    sources: list[StepSource]
+
+
+class MemorySearchStepDetails(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    query: str
+    results: list[str]
+
+
+class MemorySaveStepDetails(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    messages: list[str]
+
+
+class RefusalStepDetails(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    source: Literal["app", "context", "gateway", "memory"]
+    reason: str
+    operation: str
+
+
+class StepRequestBase(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    message: str = Field(min_length=1)
+
+
+class ToolStepRequest(StepRequestBase):
+    kind: Literal["tool"]
+    details: ToolStepDetails
+
+
+class LookupStepRequest(StepRequestBase):
+    kind: Literal["lookup"]
+    details: LookupStepDetails
+
+
+class MemorySearchStepRequest(StepRequestBase):
+    kind: Literal["memory_search"]
+    details: MemorySearchStepDetails
+
+
+class MemorySaveStepRequest(StepRequestBase):
+    kind: Literal["memory_save"]
+    details: MemorySaveStepDetails
+
+
+class RefusalStepRequest(StepRequestBase):
+    kind: Literal["refusal"]
+    details: RefusalStepDetails
+
+
+ActivityStepRequest = Annotated[
+    ToolStepRequest
+    | LookupStepRequest
+    | MemorySearchStepRequest
+    | MemorySaveStepRequest
+    | RefusalStepRequest,
+    Field(discriminator="kind"),
+]
+
+
 class Instructions(BaseModel):
     claim: str
 
 
-class DocumentRead(BaseModel):
-    document: Literal["policy_wording", "claims_manual"]
-    section_id: str
-    title: str
-
-
-class Activity(BaseModel):
+class ActivityBase(BaseModel):
     id: int
-    message: str
     created_at: str
+    message: str
+
+
+class BookkeepingActivity(ActivityBase):
+    kind: Literal["activity"]
+    details: None
+
+
+class ToolActivity(ToolStepRequest, ActivityBase):
+    pass
+
+
+class LookupActivity(LookupStepRequest, ActivityBase):
+    pass
+
+
+class MemorySearchActivity(MemorySearchStepRequest, ActivityBase):
+    pass
+
+
+class MemorySaveActivity(MemorySaveStepRequest, ActivityBase):
+    pass
+
+
+class RefusalActivity(RefusalStepRequest, ActivityBase):
+    pass
+
+
+ActivityRecord = Annotated[
+    BookkeepingActivity
+    | ToolActivity
+    | LookupActivity
+    | MemorySearchActivity
+    | MemorySaveActivity
+    | RefusalActivity,
+    Field(discriminator="kind"),
+]
 
 
 class ClaimBundle(BaseModel):
@@ -493,8 +616,7 @@ class ClaimBundle(BaseModel):
     sign_off_required: bool
     gateway_refused: bool
     gateway_refusal_reason: str | None
-    activity: list[Activity]
-    documents_read: list[DocumentRead]
+    activity: list[ActivityRecord]
 
 
 class PolicyRecord(BaseModel):

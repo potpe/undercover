@@ -376,8 +376,10 @@ def test_gateway_payment_holds_only_for_mcp_errors(monkeypatch):
     held = []
     monkeypatch.setattr(
         main.agent_api,
-        "log_activity",
-        lambda claim_id, reason: held.append(("activity", claim_id, reason)),
+        "log_step",
+        lambda claim_id, kind, message, details: held.append(
+            ("step", claim_id, kind, message, details)
+        ),
     )
     monkeypatch.setattr(
         main.agent_api,
@@ -393,7 +395,18 @@ def test_gateway_payment_holds_only_for_mcp_errors(monkeypatch):
     monkeypatch.setattr(main, "pay_gateway", gateway_failure)
     outcome = main.make_payment_node(True)(state)
     assert outcome["claim_status"] == "waiting_for_sign_off"
-    assert [entry[0] for entry in held] == ["activity", "hold"]
+    assert [entry[0] for entry in held] == ["step", "hold"]
+    assert held[0] == (
+        "step",
+        "CLM-1001",
+        "refusal",
+        "Gateway refusal: Gateway unavailable",
+        {
+            "source": "gateway",
+            "reason": "Gateway unavailable",
+            "operation": "undercover-app___pay_claim",
+        },
+    )
 
     held.clear()
 
@@ -767,6 +780,19 @@ def test_completed_screen_is_checkpointed_across_resume_and_new_threads(
 
 def test_claim_tools_use_direct_api_and_context_tools(client, monkeypatch):
     use_backend(monkeypatch)
+    logged_steps = []
+    monkeypatch.setattr(
+        tools,
+        "log_step",
+        lambda claim_id, kind, message, details: logged_steps.append(
+            {
+                "claim_id": claim_id,
+                "kind": kind,
+                "message": message,
+                "details": details,
+            }
+        ),
+    )
 
     tool_list = {
         item.name: item for item in tools.route_tools(claim_context("CLM-1001"))
@@ -781,6 +807,16 @@ def test_claim_tools_use_direct_api_and_context_tools(client, monkeypatch):
     assert bundle["policy"]["policy_id"] == "POL-2001"
     assert found["answer"][0]["section_id"] == "10"
     assert "$35 per traveler" in section["answer"]["content"]
+    lookups = [step for step in logged_steps if step["kind"] == "lookup"]
+    assert [step["details"]["operation"] for step in lookups] == [
+        "search_documents",
+        "read_section",
+    ]
+    assert all(step["details"]["sources"] for step in lookups)
+    lookup_files = {
+        source["file"] for step in lookups for source in step["details"]["sources"]
+    }
+    assert lookup_files == {"claims_manual.md"}
     assert not hasattr(main, "search_documents")
     assert not hasattr(main, "read_document_section")
 
@@ -853,6 +889,10 @@ def test_graph_approves_and_pays_a_small_claim(client, monkeypatch):
     assert bundle["decision"]["decided_at"].endswith("+00:00")
     assert bundle["decision"]["manual_version"] == "2026.2"
     assert bundle["paid_amount"] == 420.0
+    assert any(
+        entry["kind"] == "lookup" and entry["details"]["operation"] == "read_section"
+        for entry in bundle["activity"]
+    )
     messages = [entry["message"] for entry in bundle["activity"]]
     assert messages[0] == (
         "Security check: No text attempts to instruct the claims handler."
@@ -1122,10 +1162,12 @@ def test_decision_tool_refusal_returns_to_model_for_corrected_draft(
     assert bundle["decision"]["calculation"] is None
     assert bundle["decision"]["manual_version"] == "2026.2"
     assert bundle["decision"]["decided_at"].endswith("+00:00")
-    assert any(
-        "App refusal:" in entry["message"] and "section 14" in entry["message"].lower()
-        for entry in bundle["activity"]
-    )
+    refusals = [entry for entry in bundle["activity"] if entry["kind"] == "refusal"]
+    assert len(refusals) == 1
+    assert refusals[0]["details"]["source"] == "app"
+    assert refusals[0]["details"]["operation"] == "record_decision"
+    assert "section 14" in refusals[0]["details"]["reason"].lower()
+    assert refusals[0]["message"].startswith("App refusal:")
     assert (
         sum(
             entry["message"].startswith("Decision recorded:")
@@ -1378,6 +1420,19 @@ def test_gateway_payment_refusal_holds_claim_until_idempotent_signoff(
     assert "Gateway rejected payment" in held["gateway_refusal_reason"]
     assert held["paid_amount"] is None
     assert len(payment_calls) == 1
+    refusals = [entry for entry in held["activity"] if entry["kind"] == "refusal"]
+    assert len(refusals) == 1
+    assert refusals[0]["details"] == {
+        "source": "gateway",
+        "reason": held["gateway_refusal_reason"],
+        "operation": "undercover-app___pay_claim",
+    }
+    assert refusals[0]["message"].startswith("Gateway refusal:")
+    assert next(
+        index
+        for index, entry in enumerate(held["activity"])
+        if entry["message"] == "Decision recorded: approve for $3,750.00"
+    ) < held["activity"].index(refusals[0])
 
     signed = client.post("/api/claims/CLM-1003/sign-off", json={"handler_id": "HND-01"})
     assert signed.status_code == 200

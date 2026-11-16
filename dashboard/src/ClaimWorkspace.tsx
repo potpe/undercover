@@ -10,7 +10,7 @@ import { ActivityPanel } from "./ActivityPanel";
 import { ClaimDetails } from "./ClaimDetails";
 import { ClaimOverview } from "./ClaimOverview";
 import { DecisionSection } from "./DecisionSection";
-import { DocumentSections } from "./DocumentSections";
+import { ContextUsed } from "./ContextUsed";
 
 function errorMessage(error: unknown): string {
   return error instanceof Error
@@ -125,7 +125,7 @@ export function ClaimWorkspace({
             activity={bundle.activity}
             status={bundle.claim.status}
           />
-          <DocumentSections reads={bundle.documents_read} />
+          <ContextUsed activity={bundle.activity} />
           <ClaimDetails bundle={bundle} />
         </>
       ) : null}

@@ -10,7 +10,7 @@ from langgraph.store.base import BaseStore
 from mcp.shared.exceptions import McpError
 from pydantic import BaseModel, ConfigDict, Field
 
-from agent.api import canonical_claim, log_activity
+from agent.api import canonical_claim, log_activity, log_step
 from agent.claim_context import ClaimContext
 from agent.direct import DirectRoute
 from agent.gateway import (
@@ -101,12 +101,37 @@ class ModelToolRoute:
     memory_store: BaseStore | None
 
     def invoke(self, name: str, arguments: dict[str, Any]) -> Any:
+        tool_name = name
+        if self.selected_gateway and name in APP_OPERATIONS:
+            tool_name = f"{APP_TOOL_PREFIX}{name}"
+        elif self.selected_gateway and name in CONTEXT_OPERATIONS:
+            tool_name = f"{CONTEXT_TOOL_PREFIX}{name}"
+        log_step(
+            self.claim_context.claim_id,
+            "tool",
+            f"Calling tool {tool_name}",
+            {
+                "name": tool_name,
+                "input": arguments,
+            },
+        )
         if name == "search_memory":
             if self.memory_store is None:
                 raise RuntimeError("Memory search is unavailable for this claim")
-            return search_customer_memory(
-                self.memory_store, self.claim_context, arguments["query"]
+            try:
+                results = search_customer_memory(
+                    self.memory_store, self.claim_context, arguments["query"]
+                )
+            except ToolException as error:
+                self._log_refusal("memory", str(error), name)
+                raise
+            log_step(
+                self.claim_context.claim_id,
+                "memory_search",
+                f"Searched customer memory for {arguments['query']}",
+                {"query": arguments["query"], "results": results},
             )
+            return results
         if name in CONTEXT_OPERATIONS:
             return self.invoke_context(name, arguments)
         if not self.selected_gateway:
@@ -121,17 +146,95 @@ class ModelToolRoute:
             arguments,
         )
 
+    def _log_refusal(self, source: str, reason: str, operation: str) -> None:
+        prefix = {
+            "app": "App",
+            "context": "Context",
+            "gateway": "Gateway",
+            "memory": "Memory",
+        }[source]
+        log_step(
+            self.claim_context.claim_id,
+            "refusal",
+            f"{prefix} refusal: {reason}",
+            {"source": source, "reason": reason, "operation": operation},
+        )
+
     def invoke_context(self, name: str, arguments: dict[str, Any]) -> Any:
         if not self.selected_gateway:
             try:
-                return self.direct.invoke_context_tool(name, arguments)
+                result = self.direct.invoke_context_tool(name, arguments)
             except ToolException as error:
-                log_activity(self.claim_context.claim_id, f"Context refusal: {error}")
+                self._log_refusal("context", str(error), name)
                 raise
+            sources = _context_sources(result)
+            log_step(
+                self.claim_context.claim_id,
+                "lookup",
+                f"Looked up context with {name}",
+                {
+                    "operation": name,
+                    "input": arguments,
+                    "sources": sources,
+                },
+            )
+            return result
         tool = self.remote.get(f"{CONTEXT_TOOL_PREFIX}{name}")
         if tool is None:
             raise RuntimeError(f"Gateway is missing context operation {name}")
-        return _invoke_gateway(tool, self.claim_context, name, arguments)
+        result = _invoke_gateway(tool, self.claim_context, name, arguments)
+        sources = _context_sources(result)
+        log_step(
+            self.claim_context.claim_id,
+            "lookup",
+            f"Looked up context with {name}",
+            {
+                "operation": name,
+                "input": arguments,
+                "sources": sources,
+            },
+        )
+        return result
+
+
+def _context_sources(result: Any) -> list[dict[str, Any]]:
+    """Extract normalized governance source records from a context result."""
+    sources: list[dict[str, Any]] = []
+    _collect_context_sources(result, sources)
+    unique_sources: list[dict[str, Any]] = []
+    seen: set[str] = set()
+    for source in sources:
+        identity = json.dumps(source, ensure_ascii=False, sort_keys=True)
+        if identity not in seen:
+            seen.add(identity)
+            unique_sources.append(source)
+    return unique_sources
+
+
+def _collect_context_sources(value: Any, sources: list[dict[str, Any]]) -> None:
+    if isinstance(value, dict):
+        source = value.get("source")
+        if isinstance(source, dict):
+            _append_context_source(source, sources)
+        nested_sources = value.get("sources")
+        if isinstance(nested_sources, list):
+            for entry in nested_sources:
+                if isinstance(entry, dict):
+                    _append_context_source(entry, sources)
+        for key, nested in value.items():
+            if key not in {"source", "sources"}:
+                _collect_context_sources(nested, sources)
+    elif isinstance(value, list):
+        for nested in value:
+            _collect_context_sources(nested, sources)
+
+
+def _append_context_source(
+    source: dict[str, Any], sources: list[dict[str, Any]]
+) -> None:
+    fields = ("file", "system", "owner", "reviewed")
+    if all(field in source for field in fields):
+        sources.append({field: source[field] for field in fields})
 
 
 def _gateway_tools_by_operation() -> dict[str, Any]:
@@ -181,16 +284,36 @@ def _invoke_gateway(
         result = invoke_gateway_tool(tool, gateway_arguments)
     except McpError as error:
         reason = str(error)
-        log_activity(context.claim_id, f"Gateway refusal: {reason}")
+        log_step(
+            context.claim_id,
+            "refusal",
+            f"Gateway refusal: {reason}",
+            {"source": "gateway", "reason": reason, "operation": operation},
+        )
         raise ToolException(reason) from error
     except ToolException as error:
         if operation in CONTEXT_OPERATIONS:
-            log_activity(context.claim_id, f"Context refusal: {error}")
+            reason = str(error)
+            log_step(
+                context.claim_id,
+                "refusal",
+                f"Context refusal: {reason}",
+                {
+                    "source": "context",
+                    "reason": reason,
+                    "operation": operation,
+                },
+            )
             raise
         if not is_gateway_tool_refusal(error):
             raise
         reason = str(error)
-        log_activity(context.claim_id, f"App refusal: {reason}")
+        log_step(
+            context.claim_id,
+            "refusal",
+            f"App refusal: {reason}",
+            {"source": "app", "reason": reason, "operation": operation},
+        )
         raise
     if operation == "get_claim":
         log_activity(context.claim_id, "Read claim, policy and customer claim history")
@@ -230,7 +353,12 @@ def _invoke_direct(
         if response is None or not response.is_error:
             raise
         reason = response.text or str(error)
-        log_activity(context.claim_id, f"App refusal: {reason}")
+        log_step(
+            context.claim_id,
+            "refusal",
+            f"App refusal: {reason}",
+            {"source": "app", "reason": reason, "operation": operation},
+        )
         raise ToolException(reason) from error
 
 

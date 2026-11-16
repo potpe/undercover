@@ -103,6 +103,112 @@ def test_activity_is_returned_in_insertion_order(client):
     assert [entry["message"] for entry in activity] == ["First step", "Second step"]
     assert activity[0]["id"] < activity[1]["id"]
     assert all(entry["created_at"] for entry in activity)
+    assert all(entry["kind"] == "activity" for entry in activity)
+    assert all(entry["details"] is None for entry in activity)
+
+
+def test_legacy_activity_endpoint_keeps_message_contract(client):
+    response = client.post(
+        "/api/claims/CLM-1001/activity", json={"message": "Existing bookkeeping"}
+    )
+
+    assert response.status_code == 200
+    entry = response.json()["activity"][-1]
+    assert entry == {
+        "id": entry["id"],
+        "created_at": entry["created_at"],
+        "message": "Existing bookkeeping",
+        "kind": "activity",
+        "details": None,
+    }
+
+
+def test_typed_claim_steps_share_the_ordered_activity_feed(client):
+    steps = [
+        {
+            "kind": "tool",
+            "message": "Called claim tool",
+            "details": {"name": "get_claim", "input": {"claim_id": "CLM-1001"}},
+        },
+        {
+            "kind": "lookup",
+            "message": "Looked up policy",
+            "details": {
+                "operation": "search_documents",
+                "input": {"query": "trip delay"},
+                "sources": [
+                    {
+                        "file": "policy_wording.md",
+                        "system": "Published policy documents",
+                        "owner": "Legal",
+                        "reviewed": "2026-09-01",
+                    },
+                    {
+                        "file": "claims_manual.md",
+                        "system": "Claims operations",
+                        "owner": "Head of claims operations",
+                        "reviewed": "2026-09-01",
+                    },
+                ],
+            },
+        },
+        {
+            "kind": "memory_search",
+            "message": "Searched customer memory",
+            "details": {"query": "trip delay", "results": ["Prior delay claim"]},
+        },
+        {
+            "kind": "memory_save",
+            "message": "Saved useful memory",
+            "details": {"messages": ["Customer has a prior delay claim."]},
+        },
+        {
+            "kind": "refusal",
+            "message": "Tool request was refused",
+            "details": {
+                "source": "gateway",
+                "reason": "Payment is not available to the agent.",
+                "operation": "pay_claim",
+            },
+        },
+    ]
+    responses = [client.post("/api/claims/CLM-1001/steps", json=step) for step in steps]
+
+    assert all(response.status_code == 200 for response in responses)
+    feed = responses[-1].json()["activity"]
+    assert [entry["kind"] for entry in feed] == [step["kind"] for step in steps]
+    assert [entry["message"] for entry in feed] == [step["message"] for step in steps]
+    assert [entry["details"] for entry in feed] == [step["details"] for step in steps]
+    expected_fields = {"id", "created_at", "message", "kind", "details"}
+    assert all(set(entry) == expected_fields for entry in feed)
+    assert all(entry["created_at"] for entry in feed)
+    assert [entry["id"] for entry in feed] == sorted(entry["id"] for entry in feed)
+
+
+def test_typed_claim_steps_reject_invalid_shape_and_unknown_claim(client):
+    malformed = {
+        "kind": "lookup",
+        "message": "Lookup with incomplete source",
+        "details": {
+            "operation": "search_documents",
+            "input": {},
+            "sources": [{"file": "policy_wording.md"}],
+        },
+    }
+    assert client.post("/api/claims/CLM-1001/steps", json=malformed).status_code == 422
+    assert (
+        client.post(
+            "/api/claims/CLM-1001/steps",
+            json={"kind": "unknown", "message": "Bad", "details": {}},
+        ).status_code
+        == 422
+    )
+    valid = {
+        "kind": "memory_save",
+        "message": "Saved memory",
+        "details": {"messages": ["Useful detail"]},
+    }
+    assert client.post("/api/claims/CLM-9999/steps", json=valid).status_code == 404
 
 
 def test_initialization_does_not_duplicate_seed_records(client):

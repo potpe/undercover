@@ -402,7 +402,16 @@ def make_payment_node(gateway_enabled: bool):
                 pay_gateway(state["claim_id"], state["payout"])
             except McpError as error:
                 reason = str(error)
-                agent_api.log_activity(state["claim_id"], f"Gateway refusal: {reason}")
+                agent_api.log_step(
+                    state["claim_id"],
+                    "refusal",
+                    f"Gateway refusal: {reason}",
+                    {
+                        "source": "gateway",
+                        "reason": reason,
+                        "operation": "undercover-app___pay_claim",
+                    },
+                )
                 agent_api.hold_gateway_refusal(state["claim_id"], reason)
                 return {
                     "claim_status": "waiting_for_sign_off",
@@ -427,7 +436,15 @@ def make_payment_node(gateway_enabled: bool):
 def make_memory_save_node(memory_store: BaseStore, claim_context: ClaimContext):
     def save(state: ClaimState) -> dict[str, Any]:
         bundle = current_bundle(state["claim_id"])
-        save_claim_memory(memory_store, claim_context, bundle)
+        messages = save_claim_memory(memory_store, claim_context, bundle)
+        if messages is None:
+            return {}
+        agent_api.log_step(
+            state["claim_id"],
+            "memory_save",
+            "Customer memory saved",
+            {"messages": messages},
+        )
         return {}
 
     return save

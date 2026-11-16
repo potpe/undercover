@@ -43,6 +43,7 @@ from backend.improvement_budget import check_run
 from backend.improvement_routes import router as improvement_router
 from backend.models import (
     ActivityRequest,
+    ActivityStepRequest,
     ClaimBundle,
     ClaimSummary,
     CompleteWorkRequest,
@@ -660,6 +661,24 @@ def activity(claim_id: str, request: ActivityRequest) -> ClaimBundle:
     if get_claim_bundle(claim_id) is None:
         raise HTTPException(status_code=404, detail="Claim not found")
     add_activity(claim_id, request.message)
+    return claim(claim_id)
+
+
+@app.post(
+    "/api/claims/{claim_id}/steps",
+    operation_id="record_claim_step",
+    dependencies=[Depends(agent_key)],
+)
+def claim_step(claim_id: str, request: ActivityStepRequest) -> ClaimBundle:
+    """Record one typed agent step in a claim's chronological activity feed."""
+    if get_claim_bundle(claim_id) is None:
+        raise HTTPException(status_code=404, detail="Claim not found")
+    add_activity(
+        claim_id,
+        request.message,
+        kind=request.kind,
+        details=request.details.model_dump(),
+    )
     return claim(claim_id)
 
 

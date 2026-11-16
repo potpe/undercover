@@ -203,17 +203,8 @@ activity_table = Table(
     Column("claim_id", String, nullable=False),
     Column("message", Text, nullable=False),
     Column("created_at", DateTime(timezone=True), nullable=False),
-)
-document_reads_table = Table(
-    "document_reads",
-    metadata,
-    Column("id", Integer, primary_key=True, autoincrement=True),
-    Column("claim_id", String, nullable=False),
-    Column("document", String, nullable=False),
-    Column("section_id", String, nullable=False),
-    Column("title", String, nullable=False),
-    Column("created_at", DateTime(timezone=True), nullable=False),
-    UniqueConstraint("claim_id", "document", "section_id"),
+    Column("kind", String, nullable=False, default="activity"),
+    Column("details", JSON),
 )
 runs_table = Table(
     "runs",
@@ -553,17 +544,32 @@ def reseed_database() -> None:
     initialize_database()
 
 
-def insert_activity(connection: Connection, claim_id: str, message: str) -> None:
+def insert_activity(
+    connection: Connection,
+    claim_id: str,
+    message: str,
+    kind: str = "activity",
+    details: dict[str, Any] | None = None,
+) -> None:
     connection.execute(
         insert(activity_table).values(
-            claim_id=claim_id, message=message, created_at=timestamp()
+            claim_id=claim_id,
+            message=message,
+            created_at=timestamp(),
+            kind=kind,
+            details=details,
         )
     )
 
 
-def add_activity(claim_id: str, message: str) -> None:
+def add_activity(
+    claim_id: str,
+    message: str,
+    kind: str = "activity",
+    details: dict[str, Any] | None = None,
+) -> None:
     with connect() as connection:
-        insert_activity(connection, claim_id, message)
+        insert_activity(connection, claim_id, message, kind, details)
 
 
 def record_model_call(claim_id: str, values: dict[str, Any]) -> bool:
@@ -654,19 +660,6 @@ def get_claim_bundle(claim_id: str) -> dict[str, Any] | None:
             .mappings()
             .all()
         )
-        document_rows = (
-            connection.execute(
-                select(
-                    document_reads_table.c.document,
-                    document_reads_table.c.section_id,
-                    document_reads_table.c.title,
-                )
-                .where(document_reads_table.c.claim_id == claim_id)
-                .order_by(document_reads_table.c.id)
-            )
-            .mappings()
-            .all()
-        )
         plan = connection.execute(
             select(plans_table.c.data).where(plans_table.c.plan == policy["plan"])
         ).scalar_one()
@@ -721,10 +714,11 @@ def get_claim_bundle(claim_id: str) -> dict[str, Any] | None:
                 "id": activity["id"],
                 "message": activity["message"],
                 "created_at": iso(activity["created_at"]),
+                "kind": activity["kind"],
+                "details": activity["details"],
             }
             for activity in activity_rows
         ],
-        "documents_read": [dict(document) for document in document_rows],
     }
 
 

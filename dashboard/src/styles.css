@@ -501,6 +501,60 @@ h3 {
   line-height: 1.6;
 }
 
+.decision-record {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(12rem, 1fr));
+  gap: 1rem;
+  margin: 1.25rem 0 0;
+  padding: 1rem;
+  border-radius: 0.75rem;
+  background: var(--nav);
+}
+
+.decision-record div {
+  display: grid;
+  gap: 0.3rem;
+  min-width: 0;
+}
+
+.decision-record dd {
+  overflow-wrap: anywhere;
+}
+
+.calculation {
+  margin-top: 1.25rem;
+  padding: 1rem;
+  border-radius: 0.75rem;
+  background: var(--nav);
+}
+
+.calculation h3 {
+  margin: 0 0 0.5rem;
+}
+
+.calculation ul {
+  display: grid;
+  gap: 0.35rem;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.calculation li,
+.calculation > p {
+  display: flex;
+  justify-content: space-between;
+  gap: 1rem;
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+
+.calculation > p {
+  margin-top: 0.75rem;
+  padding-top: 0.75rem;
+  box-shadow: inset 0 1px var(--muted);
+}
+
 .policy-citation {
   display: grid;
   gap: 0.25rem;
@@ -571,21 +625,157 @@ h3 {
   list-style: none;
 }
 
-.activity-panel li {
+.activity-panel > ol > li {
   display: grid;
   grid-template-columns: 5rem 1fr;
   gap: 1rem;
   padding: 0.75rem 0;
 }
 
-.activity-panel li + li {
+.activity-panel > ol > li + li {
   box-shadow: inset 0 1px var(--nav);
 }
 
-.activity-panel time {
+.activity-panel > ol > li > time {
   color: var(--muted);
   font-family: "JetBrains Mono", monospace;
   font-size: 0.75rem;
+}
+
+.activity-content {
+  min-width: 0;
+  overflow-wrap: anywhere;
+  line-height: 1.5;
+}
+
+.activity-detail {
+  display: grid;
+  gap: 0.4rem;
+  margin: 0.5rem 0 0;
+  color: var(--muted);
+  font-size: 0.875rem;
+}
+
+.activity-detail p {
+  margin: 0;
+}
+
+.activity-detail dl {
+  display: grid;
+  gap: 0.3rem;
+  margin: 0;
+}
+
+.activity-detail dl div,
+.lookup-detail ul li {
+  display: grid;
+  gap: 0.15rem;
+  min-width: 0;
+}
+
+.activity-detail dd {
+  margin: 0;
+  overflow-wrap: anywhere;
+  font-family: "JetBrains Mono", monospace;
+  font-size: 0.75rem;
+}
+
+.lookup-detail ul {
+  padding: 0;
+  list-style: none;
+}
+
+.lookup-detail ul li span {
+  color: var(--muted);
+  font-size: 0.75rem;
+}
+
+.activity-detail code {
+  display: block;
+  max-width: 100%;
+  overflow-wrap: anywhere;
+  white-space: pre-wrap;
+  font-family: "JetBrains Mono", monospace;
+  font-size: 0.75rem;
+}
+
+.activity-detail ul {
+  display: grid;
+  gap: 0.35rem;
+  margin: 0;
+  padding-left: 1.25rem;
+}
+
+.activity-refusal {
+  margin: 0.25rem 0;
+  padding: 0.75rem;
+  border-radius: 0.75rem;
+  background: #f8dce5;
+  color: #8f1741;
+}
+
+.refusal-detail {
+  color: #8f1741;
+}
+
+.context-files {
+  display: grid;
+  gap: 0.75rem;
+  margin-top: 1rem;
+}
+
+.context-file {
+  min-width: 0;
+  padding: 1rem;
+  border-radius: 0.75rem;
+  background: var(--nav);
+}
+
+.context-file-heading h3 {
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+
+.context-file-heading p {
+  margin: 0.35rem 0 0;
+  color: var(--muted);
+  font-size: 0.8125rem;
+}
+
+.context-file > ul {
+  display: grid;
+  gap: 0.75rem;
+  margin: 1rem 0 0;
+  padding: 0;
+  list-style: none;
+}
+
+.context-file > ul > li {
+  display: grid;
+  gap: 0.5rem;
+  min-width: 0;
+}
+
+.context-file dl {
+  display: grid;
+  gap: 0.5rem;
+  margin: 0;
+}
+
+.context-file dl div {
+  display: grid;
+  grid-template-columns: minmax(5rem, 0.35fr) minmax(0, 1fr);
+  gap: 0.75rem;
+}
+
+.context-file dd {
+  overflow-wrap: anywhere;
+  font-family: "JetBrains Mono", monospace;
+  font-size: 0.75rem;
+}
+
+.gateway-reason {
+  overflow-wrap: anywhere;
 }
 
 .claim-details {
@@ -877,21 +1067,6 @@ dd {
   color: #a31545;
 }
 
-.sections-read {
-  display: grid;
-  gap: 0.625rem;
-  margin: 1rem 0 0;
-  padding: 0;
-  list-style: none;
-}
-
-.sections-read li {
-  padding: 0.75rem;
-  border-radius: 0.625rem;
-  background: var(--nav);
-  line-height: 1.45;
-}
-
 footer {
   padding: 1.5rem 0 0;
   color: var(--muted);
@@ -1004,9 +1179,13 @@ footer {
     grid-template-columns: 1fr;
   }
 
-  .activity-panel li {
+  .activity-panel > ol > li {
     grid-template-columns: 4rem 1fr;
     gap: 0.75rem;
+  }
+
+  .activity-refusal {
+    grid-template-columns: minmax(0, 1fr);
   }
 
   .documents summary {
@@ -1080,6 +1259,15 @@ footer {
   .decision-refer {
     background: #4d291f;
     color: #ffbda7;
+  }
+
+  .activity-refusal {
+    background: #4b1930;
+    color: #ff9ab8;
+  }
+
+  .refusal-detail {
+    color: #ff9ab8;
   }
 
   .claim-link,

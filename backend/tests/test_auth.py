@@ -86,6 +86,11 @@ def test_handler_actions_require_a_valid_sign_in(client, method, path, body):
 
 
 def test_agent_only_and_shared_read_credentials(client, monkeypatch):
+    step = {
+        "kind": "tool",
+        "message": "Called claim tool",
+        "details": {"name": "get_claim", "input": {"claim_id": "CLM-1001"}},
+    }
     client.headers.pop("Authorization", None)
     client.headers.pop("X-API-Key", None)
     assert (
@@ -94,6 +99,7 @@ def test_agent_only_and_shared_read_credentials(client, monkeypatch):
         ).status_code
         == 401
     )
+    assert client.post("/api/claims/CLM-1001/steps", json=step).status_code == 401
     assert (
         client.post(
             "/api/claims/CLM-1001/activity",
@@ -116,6 +122,7 @@ def test_agent_only_and_shared_read_credentials(client, monkeypatch):
         ).status_code
         == 401
     )
+    assert client.post("/api/claims/CLM-1001/steps", json=step).status_code == 401
     client.headers["X-API-Key"] = "undercover-e2e-agent-key-32-characters"
     assert (
         client.post(
@@ -123,6 +130,7 @@ def test_agent_only_and_shared_read_credentials(client, monkeypatch):
         ).status_code
         == 200
     )
+    assert client.post("/api/claims/CLM-1001/steps", json=step).status_code == 200
     assert client.get("/api/claims").status_code == 200
     assert client.get("/api/policies/POL-2001").status_code == 200
     assert client.get("/api/customers/CUS-3001/history").status_code == 200
@@ -131,6 +139,7 @@ def test_agent_only_and_shared_read_credentials(client, monkeypatch):
     client.headers.pop("X-API-Key")
     assert client.get("/api/claims").status_code == 401
     client.headers["Authorization"] = "Bearer dana-token"
+    assert client.post("/api/claims/CLM-1001/steps", json=step).status_code == 401
     assert client.get("/api/claims").status_code == 200
     assert client.get("/api/policies/POL-2001").status_code == 200
     assert client.get("/api/customers/CUS-3001/history").status_code == 200
@@ -212,6 +221,7 @@ def test_registered_api_routes_match_explicit_dependency_inventory():
         ("POST", "/api/claims/{claim_id}/model-calls"): {"agent_key"},
         ("POST", "/api/claims/{claim_id}/work-periods"): {"agent_key"},
         ("POST", "/api/claims/{claim_id}/activity"): {"agent_key"},
+        ("POST", "/api/claims/{claim_id}/steps"): {"agent_key"},
         ("GET", "/api/agent/instructions"): {"current_handler"},
         ("GET", "/api/handlers"): {"current_handler"},
         ("POST", "/api/rounds"): {"senior_handler"},

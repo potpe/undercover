@@ -14,7 +14,7 @@ The UnderCover Agent works the queue the way a handler does. A dispatch covers e
 
 The claim model uses the same claim-scoped tools whether it reaches the app directly or through AgentCore Gateway. The model cannot supply claim, policy or customer ids for its reads/calculation, nor a decision maker; the graph supplies those from the current claim. The backend requires and persists `decided_by`: the agent supplies `UnderCover Agent (configuration version N)` and the screening referral supplies `Security check`. The model records a decision through a tool, but payment remains a graph operation. Bookkeeping, runs, versions, the improver, and the security check's claim read/referral continue to use the direct app route with the agent key. When configured, Gateway requests use AWS CLI credentials and region and SigV4 for `bedrock-agentcore`; otherwise app model tools use the direct API and its key.
 
-The security check and both app routes use the same canonical claim text. App, context and Gateway policy refusals reach the model as refusals, never as successful-looking answers. A Gateway payment refusal is recorded directly and moves an eligible approved, unpaid claim from `in_progress` to `waiting_for_sign_off`, storing `gateway_refused` and `gateway_refusal_reason`. The agent-key-only bookkeeping operation is `POST /api/internal/claims/{claim_id}/gateway-hold` with a required `reason`; it is not part of the agent OpenAPI document or Gateway. The claim bundle exposes the refusal fields. The existing handler sign-off records payment atomically; resuming the graph does not pay again. The sign-off explanation identifies a Gateway refusal rather than saying the app limit was exceeded.
+The security check and both app routes use the same canonical claim text. App, context and Gateway policy refusals reach the model as refusals, never as successful-looking answers. A Gateway payment refusal is recorded directly and moves an eligible approved, unpaid claim from `in_progress` to `waiting_for_sign_off`, storing `gateway_refused` and `gateway_refusal_reason`. The agent-key-only bookkeeping operation is `POST /api/internal/claims/{claim_id}/gateway-hold` with a required `reason`; it is not part of the agent OpenAPI document or Gateway. The claim bundle exposes the refusal fields. The existing handler sign-off records payment atomically; resuming the graph does not pay again. The sign-off explanation identifies that Gateway refused payment, rather than saying the payout exceeded the app approval limit.
 
 The agent reads `UNDERCOVER_API`, `UNDERCOVER_GATEWAY_URL`, `UNDERCOVER_CONTEXT` and `UNDERCOVER_MEMORY_ID` when constructing the applicable client or claim graph, not at module import, so late `.env` loading is honored. When configured, memory uses the AWS CLI's credentials and region. MCP operations remain synchronous to the graph: each short asynchronous MCP call runs on its own worker thread and event loop, without consuming or replacing the main thread's event loop.
 
@@ -25,6 +25,8 @@ The service's read-only tools are `lookup_term`, `describe_fields`, `get_plan`, 
 ## Decision records
 
 An accepted decision is a complete, immutable record. It contains the decision, USD `payout`, `section`, plain-language `reason`, required `decided_by`, UTC `decided_at` and `manual_version` from the backend documents table (currently `2026.2`). An approval also stores `calculation` as `{ "lines": [{ "step": "...", "amount": 0.00 }], "payout": 0.00 }`; its payout must exactly match the calculation payout. Declines and referrals have zero payout and no calculation. The agent supplies `UnderCover Agent (configuration version N)` as maker; the hidden-instruction screening referral supplies `Security check`.
+
+The claim page shows every persisted decision field, including maker, decision time and manual version. For approvals it also shows every calculation line and its amount, plus the calculation payout. Sign-off identity/time and payment amount/time appear when present; declined and referred decisions have no calculation section.
 
 `calculate_payout` keeps the latest working calculation for the claim's current attempt, identified by `failed_attempts + 1`. A later calculation in that attempt replaces the earlier working calculation. Transient resume stays in the same attempt; an ordinary failure/new thread starts a fresh attempt. Only an accepted approval copies its exact calculation into the immutable decision record; declines and referrals never do.
 
@@ -63,9 +65,9 @@ Our goal is to handle claims straight through, as accurately as our handlers do.
 
 - The queue, with where each claim stands: waiting, in progress, waiting for sign-off, decided or left for a handler.
 - The current dispatch's N, model, reasoning, claims, attempts, states, record-built summary, model cost, active work time and whole-run time.
-- Each claim in full, with the agent's decision and its reasons.
-- What the agent is doing on a claim while it works, step by step.
-- Which sections of the policy wording and claims manual it read.
+- Each claim in full, with its complete decision record and, for approvals, the exact payout calculation.
+- What the agent is doing on a claim while it works, in the existing chronological activity feed. Typed steps distinguish ordinary activity, remote tool calls, context lookups, memory searches/saves and refusals. Tool details identify the route-specific remote name and inputs; lookup details include operation, input and source provenance; memory details show the query/results or saved event summaries; refusals show source and reason. Existing bookkeeping messages remain ordinary activity.
+- A grouped **Context used** view in place of Sections read. It groups lookups by source file, deduplicates repeated operation/input pairs within each file and identifies each source's system, owner and review date.
 - Evaluations, newest first, with every quality, mistake, cost and time measure and handler/agent comparisons linked to the copies.
 - The claim agent's instructions, read only.
 
@@ -76,7 +78,7 @@ Our goal is to handle claims straight through, as accurately as our handlers do.
 - Our handlers' own decisions on these claims are in `data/evals/`. We use them to check the agent's work. The agent must never see them.
 - Amounts are in US dollars.
 
-The generated `/api/agent/openapi.json` document contains exactly `get_claim`, `get_policy`, `get_claim_history`, `calculate_payout`, `record_decision` and `pay_claim`. Document search and section reads belong to the context service, not the app API. The API document accepts the key or handler sign-in, has no deployment address or key tool input, and excludes handler actions, runs, evaluations and improvement. The Gateway-refusal hold operation is also excluded. In the agent's model surface, `pay_claim` is a graph operation, not a model tool.
+The generated `/api/agent/openapi.json` document contains exactly `get_claim`, `get_policy`, `get_claim_history`, `calculate_payout`, `record_decision` and `pay_claim`. Document search and section reads belong to the context service, not the app API. The agent-key-only `POST /api/claims/{id}/steps` bookkeeping endpoint accepts typed step payloads, updates the existing claim activity timeline and is outside those six OpenAPI operations and Gateway. Existing message-based activity bookkeeping remains available for non-step entries. The API document accepts the key or handler sign-in, has no deployment address or key tool input, and excludes handler actions, runs, evaluations and improvement. The Gateway-refusal hold operation is also excluded. In the agent's model surface, `pay_claim` is a graph operation, not a model tool.
 
 Judge and evaluation reads use the decision record's `section` field. Their existing scoring behavior is unchanged.
 

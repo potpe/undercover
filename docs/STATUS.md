@@ -1,6 +1,20 @@
 # Status
 
-## Context build in progress
+## Context build: offline complete, limited live handover
+
+Phase 5's typed steps, Context used and complete decision view pass the final cumulative no-`.env` gate: 360 Python tests at 93.69% coverage, both isolated imports (27 server / 31 context packages), 56 dashboard tests at 88.76% statement / 89.82% line coverage, and all 15 Playwright tests. Ruff, Pyright, Prettier, ESLint and TypeScript pass. The production build succeeds with `.env` absent, and the original file was restored after checks. One upstream Mangum warning remains unsuppressed. SQLite explicit reseeding retains its full checkpoint reset, with a real SqliteSaver regression; startup performs no schema migration.
+
+Offline visual review used isolated local stand-ins: populated context, approval/refusal and Gateway-hold fixtures were inspected, with desktop/light and mobile/light/dark screenshots. Inspected 390px pages have no horizontal overflow and Gateway holds identify their actual cause. Auth expiry prevented every planned theme/viewport combination for the refusal fixture; component and browser tests cover its typed presentation. No visual fix was required. The subsequent live pass is recorded below.
+
+## Context live verification (2026-11-16): blocked
+
+The final offline gate completed before exactly one `npm run seed`. Startup confirmed 26 waiting claims and default `openai/gpt-6-luna` / low, direct laptop routing and memory off. All four development services started; an unsigned MCP client listed seven tools and called `lookup_term` with glossary provenance. Dana signed in through Playwright MCP and saw 26 claims.
+
+`uv run -m agent CLM-1001` passed screening and exercised typed tool, context lookup and refusal activity, including correction of `get_plan("UnderCover Premium")` to the canonical plan. It calculated $420.00, but the next model call failed with OpenRouter HTTP 402: requested maximum 7,152 output tokens versus an affordable 6,670. The durable claim remains `in_progress`, with no decision or payment. Its exact backend ledger has five model calls, 39,414 prompt tokens, 463 completion tokens (39,877 total), costing **$0.002311165**. The refused call has no reported usage. No memory activity was recorded.
+
+CLM-1005, CLM-1006, the N=25 dispatch, tiny evaluation and their live browser reviews have not run; there is no dispatch/evaluation/judge spend for this pass. Do not reseed: preserve CLM-1001's saved thread and calculation for recovery after credits or an explicitly approved output-cap change. All development services were stopped and the original `.env` restored byte-for-byte. Governance and legacy source files remain unchanged; no notebook or AWS operation ran.
+
+The student explicitly selected **Limited handover** after the credit failure: commit the offline-verified Phase 5 implementation with incomplete live criteria documented. The output cap and model configuration are unchanged. The remaining live checks are not claimed as passing and stay unchecked in `docs/PLAN_CONTEXT.md`.
 
 Phase 3 was committed as `2f7006e` with hooks enabled. Phase 4 passes the renewed cumulative no-`.env` gate: 340 Python tests at 93.46% coverage, 51 dashboard tests at 88.28% statement coverage, 14 Playwright tests and both isolated imports (27/31 packages). `.env` was restored; the upstream Mangum warning remains unsuppressed. Customer isolation, all three decision event pairs, memory search refusal feedback, evaluation/security exclusion, nonfatal save failure and Gateway hold/sign-off resume pass with stand-in stores only. Completed save nodes are durable across graph rebuild/resume; no process was killed between the SDK's two non-atomic event writes, which can leave partial or repeated remote events. Phase 5 and final live verification remain pending.
 

@@ -18,7 +18,13 @@ const handler: Handler = {
 };
 
 const activity = [
-  { id: 1, message: "Agent run started", created_at: "2026-11-03T12:00:00Z" },
+  {
+    id: 1,
+    message: "Agent run started",
+    created_at: "2026-11-03T12:00:00Z",
+    kind: "activity" as const,
+    details: null,
+  },
 ];
 
 function makeBundle(
@@ -148,18 +154,9 @@ function makeBundle(
     failed_attempts: 0,
     evaluation_run_id: null,
     activity,
-    documents_read: [
-      {
-        document: "claims_manual",
-        section_id: "10",
-        title: "Meals without receipts",
-      },
-      {
-        document: "policy_wording",
-        section_id: "3",
-        title: "Trip Delay",
-      },
-    ],
+    sign_off_required: status === "waiting_for_sign_off",
+    gateway_refused: false,
+    gateway_refusal_reason: null,
   };
 }
 
@@ -234,11 +231,10 @@ it("shows the full claim, policy, customer history and activity", async () => {
     screen.getByText("Checked bag arrived 30 hours late in Lisbon"),
   ).toBeDefined();
   expect(screen.getByText("Agent run started")).toBeDefined();
-  expect(screen.getByText("Sections read")).toBeDefined();
+  expect(screen.getByText("Context used")).toBeDefined();
   expect(
-    screen.getByText("Claims manual 10: Meals without receipts"),
+    screen.getByText("No reference material has been used yet."),
   ).toBeDefined();
-  expect(screen.getByText("Policy wording 3: Trip Delay")).toBeDefined();
   expect(screen.getByRole("button", { name: "Run agent" })).toBeDefined();
 
   fireEvent.click(screen.getByRole("button", { name: "Back to queue" }));
@@ -282,6 +278,13 @@ it("starts one run and polls until the decision is visible", async () => {
     ),
   ).toBeDefined();
   expect(screen.getByText("Payment recorded: $420.00")).toBeDefined();
+  expect(screen.getByText("Decision maker")).toBeDefined();
+  expect(
+    screen.getByText("UnderCover Agent (configuration version 1)"),
+  ).toBeDefined();
+  expect(screen.getByText("Claims manual")).toBeDefined();
+  expect(screen.getByText("2026.2")).toBeDefined();
+  expect(screen.getByText("Covered expenses")).toBeDefined();
   const runs = fetchMock.mock.calls.filter(
     ([input]) => requestUrl(input) === "/api/claims/CLM-1001/run",
   );
@@ -459,6 +462,19 @@ it("identifies an evaluation copy and hides run and sign-off controls", async ()
   ).toBeDefined();
   expect(screen.queryByLabelText("Signing handler")).toBeNull();
   expect(screen.queryByRole("button", { name: "Run agent" })).toBeNull();
+});
+
+it("shows Gateway payment refusal instead of an app-limit explanation", async () => {
+  const held = makeBundle("waiting_for_sign_off", "approve", 3750);
+  held.gateway_refused = true;
+  held.gateway_refusal_reason = "Gateway policy declined the payment";
+  mockDetail(held);
+  render(
+    <ClaimWorkspace claimId="CLM-1001" handler={handler} onBack={vi.fn()} />,
+  );
+  expect(await screen.findByText(/The Gateway refused payment/)).toBeDefined();
+  expect(screen.getByText("Gateway policy declined the payment")).toBeDefined();
+  expect(screen.queryByText(/app approval limit/)).toBeNull();
 });
 
 it("explains when the signed-in handler cannot approve the held payout", async () => {

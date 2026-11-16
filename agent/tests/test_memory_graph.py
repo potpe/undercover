@@ -152,6 +152,7 @@ def held_approval_responses():
 def test_memory_tool_is_optional_strict_and_always_direct(monkeypatch):
     store = InMemoryStore()
     calls = []
+    monkeypatch.setattr(tools, "log_step", lambda *_args: None)
     monkeypatch.setattr(
         tools,
         "search_customer_memory",
@@ -300,7 +301,21 @@ def test_accepted_approval_memory_save_is_checkpointed_before_payment(
     )
     assert store.actions == ["save", "save", "pay", "pay"]
     assert len(store.put_calls) == 2
-    assert client.get("/api/claims/CLM-1001").json()["paid_amount"] == 420
+    bundle = client.get("/api/claims/CLM-1001").json()
+    assert bundle["paid_amount"] == 420
+    memory_steps = [
+        entry for entry in bundle["activity"] if entry["kind"] == "memory_save"
+    ]
+    assert len(memory_steps) == 1
+    assert memory_steps[0]["details"]["messages"] == [
+        human_item.value["message"].content,
+        decision_item.value["message"].content,
+    ]
+    assert bundle["activity"].index(memory_steps[0]) < next(
+        index
+        for index, entry in enumerate(bundle["activity"])
+        if entry["message"] == "Payment recorded: $420.00"
+    )
 
 
 @pytest.mark.parametrize("decision", ["decline", "refer"])
@@ -370,6 +385,10 @@ def test_memory_store_failure_does_not_block_approval_payment(
     )
     assert client.get("/api/claims/CLM-1001").json()["paid_amount"] == 420
     assert "Could not save customer memory" in caplog.text
+    assert not any(
+        entry["kind"] == "memory_save"
+        for entry in client.get("/api/claims/CLM-1001").json()["activity"]
+    )
 
 
 def test_memory_is_not_saved_again_after_signoff_resume(client, monkeypatch):

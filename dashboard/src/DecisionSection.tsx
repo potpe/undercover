@@ -57,6 +57,39 @@ export function DecisionSection({
         <strong>Policy section</strong>
         {decision.section}
       </p>
+      <dl className="decision-record">
+        <div>
+          <dt>Decision maker</dt>
+          <dd>{decision.decided_by}</dd>
+        </div>
+        <div>
+          <dt>Decision time</dt>
+          <dd>{formatDateTime(decision.decided_at)}</dd>
+        </div>
+        <div>
+          <dt>Claims manual</dt>
+          <dd>{decision.manual_version}</dd>
+        </div>
+      </dl>
+      {decision.calculation ? (
+        <section className="calculation" aria-label="Payout calculation">
+          <h3>Calculation</h3>
+          <ul>
+            {decision.calculation.lines.map((line, index) => (
+              <li key={`${line.step}-${String(index)}`}>
+                <span>{line.step}</span>
+                <strong className="mono">{formatMoney(line.amount)}</strong>
+              </li>
+            ))}
+          </ul>
+          <p>
+            <span>Calculated payout</span>
+            <strong className="mono">
+              {formatMoney(decision.calculation.payout)}
+            </strong>
+          </p>
+        </section>
+      ) : null}
       {bundle.evaluation_run_id === null &&
       bundle.claim.status === "waiting_for_sign_off" &&
       bundle.paid_amount === null ? (
@@ -64,9 +97,16 @@ export function DecisionSection({
           <div>
             <h3>Handler sign-off</h3>
             <p>
-              This payout exceeded the approval limit when decided. Payment is
-              blocked until a handler signs off.
+              {bundle.gateway_refused
+                ? "The Gateway refused payment. A handler must sign off before payment can be recorded."
+                : "This payout exceeded the approval limit when decided. A handler must sign off before payment can be recorded."}
             </p>
+            {bundle.gateway_refusal_reason ? (
+              <p className="gateway-reason">
+                <strong>Gateway response:</strong>{" "}
+                {bundle.gateway_refusal_reason}
+              </p>
+            ) : null}
           </div>
           <p>
             Signed in as <strong>{handler.name}</strong>.

@@ -2,8 +2,14 @@ import {
   expect,
   type APIRequestContext,
   type APIResponse,
-  type Page,
 } from "@playwright/test";
+import type {
+  Activity,
+  ClaimBundle,
+  ClaimStepRequest,
+} from "../dashboard/src/api";
+
+export type { Activity, ClaimStepRequest } from "../dashboard/src/api";
 
 export const AGENT_API_KEY = "undercover-e2e-agent-key-32-characters";
 export const agentHeaders = { "X-API-Key": AGENT_API_KEY };
@@ -11,6 +17,105 @@ export const agentHeaders = { "X-API-Key": AGENT_API_KEY };
 interface PayoutCalculation {
   calculation: { step: string; amount: number }[];
   payout: number;
+}
+
+type ClaimStepActivity = Exclude<Activity, { kind: "activity" }>;
+
+export async function recordClaimStep(
+  request: APIRequestContext,
+  claimId: string,
+  step: ClaimStepRequest,
+): Promise<ClaimStepActivity> {
+  const response = await request.post(
+    `http://127.0.0.1:8000/api/claims/${claimId}/steps`,
+    { data: step, headers: agentHeaders },
+  );
+  expect(response.ok()).toBe(true);
+  const bundle = (await response.json()) as ClaimBundle;
+  const recorded = bundle.activity
+    .filter(
+      (entry): entry is ClaimStepActivity =>
+        entry.kind !== "activity" &&
+        entry.kind === step.kind &&
+        entry.message === step.message,
+    )
+    .at(-1);
+  expect(recorded).toBeDefined();
+  if (!recorded) throw new Error("The claim step was not returned in activity");
+  expect(recorded.kind).toBe(step.kind);
+  expect(recorded.details).toEqual(step.details);
+  return recorded;
+}
+
+export async function recordContextTestSteps(
+  request: APIRequestContext,
+  claimId: string,
+): Promise<ClaimStepActivity[]> {
+  const lookup: ClaimStepRequest = {
+    kind: "lookup",
+    message: "Looked up the test policy context.",
+    details: {
+      operation: "search_documents",
+      input: { query: "Trip Delay" },
+      sources: [
+        {
+          file: "claims_manual.md",
+          system: "Claims operations",
+          owner: "Head of claims operations",
+          reviewed: "2026-09-01",
+        },
+        {
+          file: "policy_wording.md",
+          system: "Published policy documents",
+          owner: "Legal",
+          reviewed: "2026-09-01",
+        },
+      ],
+    },
+  };
+  const steps: ClaimStepRequest[] = [
+    {
+      kind: "tool",
+      message: "Searched approved policy files.",
+      details: {
+        name: "search_documents",
+        input: { query: "Trip Delay" },
+      },
+    },
+    {
+      kind: "tool",
+      message: "Looked up a term in the context gateway.",
+      details: {
+        name: "undercover-context___lookup_term",
+        input: { term: "Trip Delay" },
+      },
+    },
+    lookup,
+    lookup,
+    {
+      kind: "memory_search",
+      message: "Searched customer memory.",
+      details: {
+        query: "prior claim history",
+        results: ["CLM-0990: Trip delay claim approved for $320.00."],
+      },
+    },
+    {
+      kind: "memory_save",
+      message: "Saved sanitized customer notes.",
+      details: {
+        messages: [
+          "Customer reported a flight cancellation and requested reimbursement for eligible prepaid expenses.",
+          "Decision: approve eligible trip cancellation expenses under the policy.",
+        ],
+      },
+    },
+  ];
+  const recorded: ClaimStepActivity[] = [];
+  for (const step of steps) {
+    recorded.push(await recordClaimStep(request, claimId, step));
+  }
+  return recorded;
 }
 
 export async function recordApproval(
@@ -73,49 +178,6 @@ export async function recordApproval(
     },
     headers: agentHeaders,
   });
-}
-
-export async function mockClaimDocumentReads(
-  page: Page,
-  request: APIRequestContext,
-): Promise<[APIResponse, APIResponse]> {
-  const response = await request.get(
-    "http://127.0.0.1:8000/api/claims/CLM-1001",
-    { headers: agentHeaders },
-  );
-  if (!response.ok()) throw new Error("Could not load the test claim bundle");
-  const claimBundle = (await response.json()) as Record<string, unknown>;
-  const retiredSection = await request.post(
-    "http://127.0.0.1:8000/api/claims/CLM-1001/document-section",
-    {
-      data: { document: "claims_manual", section_id: "10" },
-      headers: agentHeaders,
-    },
-  );
-  const retiredSearch = await request.post(
-    "http://127.0.0.1:8000/api/claims/CLM-1001/document-search",
-    { data: {}, headers: agentHeaders },
-  );
-  await page.route("**/api/claims/CLM-1001", (route) =>
-    route.fulfill({
-      json: {
-        ...claimBundle,
-        documents_read: [
-          {
-            document: "claims_manual",
-            section_id: "10",
-            title: "Meals without receipts",
-          },
-          {
-            document: "policy_wording",
-            section_id: "3",
-            title: "Trip Delay",
-          },
-        ],
-      },
-    }),
-  );
-  return [retiredSection, retiredSearch];
 }
 
 export async function handlerHeaders(

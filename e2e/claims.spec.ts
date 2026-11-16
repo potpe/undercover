@@ -3,7 +3,7 @@ import { signIn } from "./auth";
 import {
   agentHeaders,
   handlerHeaders,
-  mockClaimDocumentReads,
+  recordClaimStep,
   recordApproval,
 } from "./api";
 
@@ -80,6 +80,16 @@ test("a decided claim shows its payout, reason, policy and activity", async ({
   page,
   request,
 }) => {
+  const refusal = await recordClaimStep(request, "CLM-1002", {
+    kind: "refusal",
+    message: "Context declined to answer a policy question.",
+    details: {
+      source: "context",
+      reason: "The source material does not support that conclusion.",
+      operation: "search_policy",
+    },
+  });
+  expect(refusal.kind).toBe("refusal");
   const decision = await recordApproval(request, {
     claimId: "CLM-1002",
     payout: 650,
@@ -89,6 +99,25 @@ test("a decided claim shows its payout, reason, policy and activity", async ({
       "Section 5: Baggage and Personal Effects; Section 10: How we work out your payment",
   });
   expect(decision.ok()).toBe(true);
+  const decisionBundle = (await decision.json()) as {
+    decision: {
+      decided_by: string;
+      decided_at: string;
+      manual_version: string;
+      calculation: {
+        lines: { step: string; amount: number }[];
+        payout: number;
+      };
+    };
+  };
+  expect(decisionBundle.decision.decided_by).toBe("Test handler");
+  expect(decisionBundle.decision.manual_version).toBe("2026.2");
+  expect(Number.isFinite(Date.parse(decisionBundle.decision.decided_at))).toBe(
+    true,
+  );
+  expect(decisionBundle.decision.decided_at).toMatch(/(?:Z|\+00:00)$/);
+  expect(decisionBundle.decision.calculation.payout).toBe(650);
+  expect(decisionBundle.decision.calculation.lines.length).toBeGreaterThan(0);
   const payment = await request.post(
     "http://127.0.0.1:8000/api/claims/CLM-1002/payment",
     { data: { amount: 650 }, headers: agentHeaders },
@@ -101,6 +130,21 @@ test("a decided claim shows its payout, reason, policy and activity", async ({
   await expect(
     page.getByRole("heading", { name: "Agent decision" }),
   ).toBeVisible();
+  await expect(page.getByText("Test handler", { exact: true })).toBeVisible();
+  await expect(page.getByText("2026.2", { exact: true })).toBeVisible();
+  const calculation = page.getByRole("region", {
+    name: "Payout calculation",
+  });
+  await expect(calculation).toBeVisible();
+  await expect(calculation.locator("li")).toHaveCount(
+    decisionBundle.decision.calculation.lines.length,
+  );
+  for (const line of decisionBundle.decision.calculation.lines) {
+    await expect(
+      calculation.getByText(line.step, { exact: true }),
+    ).toBeVisible();
+  }
+  await expect(calculation.getByText("Calculated payout")).toBeVisible();
   await expect(page.getByText("Approve", { exact: true })).toBeVisible();
   await expect(
     page.locator(".decision-summary").getByText("Payment recorded: $650.00", {
@@ -110,6 +154,14 @@ test("a decided claim shows its payout, reason, policy and activity", async ({
   await expect(
     page.getByText("The lost baggage is covered by the policy.", {
       exact: false,
+    }),
+  ).toBeVisible();
+  await expect(
+    page.getByText("Context refused", { exact: true }),
+  ).toBeVisible();
+  await expect(
+    page.getByText("The source material does not support that conclusion.", {
+      exact: true,
     }),
   ).toBeVisible();
   await expect(
@@ -206,115 +258,69 @@ test("handler sign-off pays immediately without resuming the agent service", asy
   ).toHaveLength(0);
 });
 
-test("the dashboard shows dispatch claims, record summary and sections read", async ({
+test("a Gateway hold is signed off and paid only once", async ({
   page,
   request,
 }) => {
-  const run = {
-    run_id: 7,
-    kind: "dispatch",
-    concurrency: 3,
-    configuration_version: 1,
-    round_id: null,
-    round_purpose: null,
-    model_name: "openai/gpt-6-luna",
-    reasoning_effort: "low",
-    status: "completed",
-    evaluation_set: null,
-    tiny: null,
-    summary: {
-      approved: 2,
-      declined: 1,
-      referred: 1,
-      waiting_for_sign_off: [{ claim_id: "CLM-1003", payout: 3750 }],
-      left_for_handler: ["CLM-1002"],
-      in_progress: ["CLM-1004"],
-      error: null,
-    },
-    created_at: "2026-11-05T12:00:00Z",
-    completed_at: "2026-11-05T12:05:00Z",
-    stopped_at: null,
-    model_cost: 0.125,
-    prompt_tokens: 1000,
-    completion_tokens: 100,
-    total_tokens: 1100,
-    active_seconds: 12.5,
-    wall_seconds: 30,
-    claims: [
-      {
-        claim_id: "CLM-1001",
-        position: 1,
-        status: "done",
-        attempts: 0,
-        result: "Approve $420.00",
-        error: null,
-        started_at: "2026-11-05T12:00:00Z",
-        finished_at: "2026-11-05T12:00:10Z",
-        model_cost: 0.05,
-        active_seconds: 10,
-      },
-      {
-        claim_id: "CLM-1002",
-        position: 2,
-        status: "left_for_handler",
-        attempts: 2,
-        result: "Provider failed",
-        error: "Provider failed",
-        started_at: "2026-11-05T12:00:00Z",
-        finished_at: "2026-11-05T12:00:20Z",
-        model_cost: 0.05,
-        active_seconds: 20,
-      },
-      {
-        claim_id: "CLM-1004",
-        position: 3,
-        status: "in_progress",
-        attempts: 0,
-        result: null,
-        error: "Rate limited",
-        started_at: "2026-11-05T12:00:00Z",
-        finished_at: null,
-        model_cost: 0.025,
-        active_seconds: 5,
-      },
-    ],
+  const decision = await recordApproval(request, {
+    claimId: "CLM-1004",
+    payout: 650,
+    reason: "The eligible emergency expense supports a $650.00 payout.",
+    section: "Section 7: Emergency Medical",
+  });
+  expect(decision.ok()).toBe(true);
+  const reason = "Gateway declined this payment for the test.";
+  const hold = await request.post(
+    "http://127.0.0.1:8000/api/internal/claims/CLM-1004/gateway-hold",
+    { data: { reason }, headers: agentHeaders },
+  );
+  expect(hold.ok()).toBe(true);
+  const held = (await hold.json()) as {
+    claim: { status: string };
+    gateway_refused: boolean;
+    gateway_refusal_reason: string | null;
   };
-  await page.route("**/api/dispatches/current", (route) =>
-    route.fulfill({ json: run }),
-  );
-  const [retiredSection, retiredSearch] = await mockClaimDocumentReads(
-    page,
-    request,
-  );
-  expect(retiredSection.status()).toBe(404);
-  expect(retiredSearch.status()).toBe(404);
+  expect(held.claim.status).toBe("waiting_for_sign_off");
+  expect(held.gateway_refused).toBe(true);
+  expect(held.gateway_refusal_reason).toBe(reason);
 
   await page.goto("/");
+  await page.getByRole("button", { name: "View claim CLM-1004" }).click();
   await expect(
-    page.getByText("2 approved, 1 declined, 1 referred."),
+    page.getByText(
+      "The Gateway refused payment. A handler must sign off before payment can be recorded.",
+      { exact: true },
+    ),
   ).toBeVisible();
-  await expect(page.getByText("openai/gpt-6-luna")).toBeVisible();
-  await expect(page.getByText("Model cost: $0.125")).toBeVisible();
-  await expect(page.locator(".dispatch-list li")).toHaveCount(3);
   await expect(
-    page
-      .locator(".dispatch-status")
-      .getByText("Left for handler", { exact: true }),
+    page.getByText(`Gateway response: ${reason}`, { exact: false }),
+  ).toBeVisible();
+  await page.getByRole("button", { name: "Sign off payout" }).click();
+  await expect(
+    page.locator(".decision-summary").getByText("Payment recorded: $650.00", {
+      exact: true,
+    }),
   ).toBeVisible();
 
-  await page
-    .getByRole("button", { name: "View claim CLM-1001" })
-    .first()
-    .click();
-  await expect(
-    page.getByRole("heading", { name: "Sections read" }),
-  ).toBeVisible();
-  await expect(
-    page.getByText("Claims manual 10: Meals without receipts", { exact: true }),
-  ).toBeVisible();
-  await expect(
-    page.getByText("Policy wording 3: Trip Delay", { exact: true }),
-  ).toBeVisible();
+  const signOff = async () =>
+    request.post("http://127.0.0.1:8000/api/claims/CLM-1004/sign-off", {
+      headers: await handlerHeaders(request),
+    });
+  expect((await signOff()).status()).toBe(200);
+  const paid = await request.get("http://127.0.0.1:8000/api/claims/CLM-1004", {
+    headers: agentHeaders,
+  });
+  const paidBundle = (await paid.json()) as {
+    paid_amount: number | null;
+    activity: { message: string }[];
+  };
+  expect(paid.ok()).toBe(true);
+  expect(paidBundle.paid_amount).toBe(650);
+  expect(
+    paidBundle.activity.filter(
+      (entry) => entry.message === "Payment recorded: $650.00",
+    ),
+  ).toHaveLength(1);
 });
 
 test("starting a dispatch sends N to the agent service", async ({

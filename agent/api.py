@@ -5,6 +5,11 @@ import os
 from typing import Any
 
 import httpx
+from pydantic import TypeAdapter
+
+from backend.models import ActivityStepRequest
+
+ACTIVITY_STEP_ADAPTER = TypeAdapter(ActivityStepRequest)
 
 
 def backend() -> httpx.Client:
@@ -47,6 +52,19 @@ def log_activity(claim_id: str, message: str) -> None:
     with backend() as client:
         response = client.post(
             f"/api/claims/{claim_id}/activity", json={"message": message}
+        )
+    response.raise_for_status()
+
+
+def log_step(claim_id: str, kind: str, message: str, details: dict[str, Any]) -> None:
+    """Record a typed claim-agent step through the direct app API."""
+    step = ACTIVITY_STEP_ADAPTER.validate_python(
+        {"kind": kind, "message": message, "details": details}
+    )
+    with backend() as client:
+        response = client.post(
+            f"/api/claims/{claim_id}/steps",
+            json=step.model_dump(mode="json"),
         )
     response.raise_for_status()
 

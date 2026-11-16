@@ -112,17 +112,56 @@ export interface Decision {
   manual_version: string;
 }
 
-export interface Activity {
+export type JSONValue =
+  null | boolean | number | string | JSONValue[] | { [key: string]: JSONValue };
+
+interface ActivityBase {
   id: number;
   message: string;
   created_at: string;
 }
 
-export interface DocumentRead {
-  document: "policy_wording" | "claims_manual";
-  section_id: string;
-  title: string;
-}
+export type Activity =
+  | (ActivityBase & { kind: "activity"; details: null })
+  | (ActivityBase & {
+      kind: "tool";
+      details: { name: string; input: Record<string, JSONValue> };
+    })
+  | (ActivityBase & {
+      kind: "lookup";
+      details: {
+        operation: string;
+        input: Record<string, JSONValue>;
+        sources: {
+          file: string;
+          system: string;
+          owner: string;
+          reviewed: string;
+        }[];
+      };
+    })
+  | (ActivityBase & {
+      kind: "memory_search";
+      details: { query: string; results: string[] };
+    })
+  | (ActivityBase & {
+      kind: "memory_save";
+      details: { messages: string[] };
+    })
+  | (ActivityBase & {
+      kind: "refusal";
+      details: {
+        source: "app" | "context" | "gateway" | "memory";
+        reason: string;
+        operation: string;
+      };
+    });
+
+export type ClaimStepRequest = Activity extends infer Step
+  ? Step extends { kind: "activity" }
+    ? never
+    : Omit<Step, "id" | "created_at">
+  : never;
 
 export interface RunClaim {
   claim_id: string;
@@ -231,7 +270,9 @@ export interface ClaimBundle {
   failed_attempts: number;
   evaluation_run_id: number | null;
   activity: Activity[];
-  documents_read: DocumentRead[];
+  sign_off_required: boolean;
+  gateway_refused: boolean;
+  gateway_refusal_reason: string | null;
 }
 
 export interface Handler {

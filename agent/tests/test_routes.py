@@ -99,6 +99,7 @@ def test_gateway_tool_surface_is_local_and_prefixed_remote_ids_are_injected(
     monkeypatch,
 ):
     calls = []
+    monkeypatch.setattr(tools, "log_step", lambda *_args: None)
 
     async def invoke(call):
         calls.append(call["args"])
@@ -339,6 +340,7 @@ def test_canonical_claim_serialization_is_stable():
 
 def test_context_injects_policy_and_customer_ids_for_gateway_tools(monkeypatch):
     calls = []
+    monkeypatch.setattr(tools, "log_step", lambda *_args: None)
 
     async def capture(call):
         calls.append(call["args"])
@@ -387,6 +389,7 @@ def test_context_injects_policy_and_customer_ids_for_gateway_tools(monkeypatch):
 
 def test_direct_route_injects_configured_decision_maker(monkeypatch):
     captured = []
+    monkeypatch.setattr(tools, "log_step", lambda *_args: None)
 
     def record_decision(_self, payload):
         captured.append(payload)
@@ -649,11 +652,18 @@ def test_real_streamable_http_gateway_tools_and_refusal_distinction(
         monkeypatch.setenv("UNDERCOVER_GATEWAY_URL", f"http://127.0.0.1:{port}/mcp")
         monkeypatch.setenv("UNDERCOVER_CONTEXT", f"http://127.0.0.1:{port}/mcp")
         monkeypatch.setattr(gateway, "signed_auth", lambda: None)
-        logged_activity = []
+        logged_steps = []
         monkeypatch.setattr(
             tools,
-            "log_activity",
-            lambda _claim_id, message: logged_activity.append(message),
+            "log_step",
+            lambda claim_id, kind, message, details: logged_steps.append(
+                {
+                    "claim_id": claim_id,
+                    "kind": kind,
+                    "message": message,
+                    "details": details,
+                }
+            ),
         )
 
         def test_backend() -> TestClient:
@@ -686,7 +696,7 @@ def test_real_streamable_http_gateway_tools_and_refusal_distinction(
         assert_gateway_payout_tool(local_tools)
         assert_gateway_decision_tool(local_tools, accepted_decisions, decision_calls)
         assert_context_refusal_routes(
-            direct_tools, local_tools, context_refusal_enabled, logged_activity
+            direct_tools, local_tools, context_refusal_enabled, logged_steps
         )
         assert gateway.pay_gateway("CLM-1001", 120)["paid"] == 120
         assert_app_refusal(local_tools, refusal_enabled)
@@ -791,20 +801,20 @@ def assert_context_refusal_routes(
     direct_tools: dict[str, BaseTool],
     gateway_tools: dict[str, BaseTool],
     refusal_enabled: list[bool],
-    logged_activity: list[str],
+    logged_steps: list[dict[str, Any]],
 ) -> None:
     refusal_enabled[0] = True
     for route_tools in (direct_tools, gateway_tools):
         with pytest.raises(ToolException, match="context refused this term"):
             route_tools["lookup_term"].invoke({"term": "blocked"})
-    assert (
-        sum(
-            "Context refusal:" in message and "context refused this term" in message
-            for message in logged_activity
-        )
-        == 2
+    refusals = [step for step in logged_steps if step["kind"] == "refusal"]
+    assert len(refusals) == 2
+    assert all(step["details"]["source"] == "context" for step in refusals)
+    assert all(
+        "context refused this term" in step["details"]["reason"] for step in refusals
     )
-    assert not any("Gateway refusal" in message for message in logged_activity)
+    assert all(step["details"]["operation"] == "lookup_term" for step in refusals)
+    assert not any(step["details"]["source"] == "gateway" for step in refusals)
 
 
 def assert_gateway_payout_tool(gateway_tools: dict[str, BaseTool]) -> None:
@@ -887,7 +897,7 @@ def test_gateway_transport_error_is_not_classified_as_app_refusal(monkeypatch):
         raise McpError(ErrorData(code=-32000, message="Gateway unavailable"))
 
     monkeypatch.setattr(tools, "invoke_gateway_tool", raise_gateway_error)
-    monkeypatch.setattr(tools, "log_activity", lambda *_args: None)
+    monkeypatch.setattr(tools, "log_step", lambda *_args: None)
     with pytest.raises(ToolException, match="Gateway unavailable") as caught:
         tools._invoke_gateway(tool, context, "get_policy", {})
     assert gateway.is_gateway_tool_refusal(caught.value) is False
@@ -895,11 +905,18 @@ def test_gateway_transport_error_is_not_classified_as_app_refusal(monkeypatch):
 
 def test_context_transport_failures_are_not_misreported_as_refusals(monkeypatch):
     context = context_fixture("CLM-1001")
-    logged_activity = []
+    logged_steps = []
     monkeypatch.setattr(
         tools,
-        "log_activity",
-        lambda _claim_id, message: logged_activity.append(message),
+        "log_step",
+        lambda claim_id, kind, message, details: logged_steps.append(
+            {
+                "claim_id": claim_id,
+                "kind": kind,
+                "message": message,
+                "details": details,
+            }
+        ),
     )
 
     def fail_transport(*_args):
@@ -925,7 +942,7 @@ def test_context_transport_failures_are_not_misreported_as_refusals(monkeypatch)
     )
     with pytest.raises(httpx.ConnectError, match="context endpoint is unavailable"):
         local_tool.invoke({"term": "benefit"})
-    assert logged_activity == []
+    assert [step["kind"] for step in logged_steps] == ["tool"]
 
 
 def context_fixture(claim_id: str, configuration_version: int = 1) -> ClaimContext:

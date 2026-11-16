@@ -20,12 +20,23 @@ def test_operations_have_ids_docstrings_and_required_inputs(client):
             if body:
                 assert body["required"] is True
                 content = body["content"]["application/json"]["schema"]
-                if "$ref" in content:
-                    model_name = content["$ref"].rsplit("/", 1)[-1]
-                    content = schema["components"]["schemas"][model_name]
-                assert set(content.get("required", [])) == set(content["properties"])
+                assert_required_inputs(content, schema["components"]["schemas"])
 
     assert len(operation_ids) == len(set(operation_ids))
+
+
+def assert_required_inputs(content, components):
+    if "$ref" in content:
+        model_name = content["$ref"].rsplit("/", 1)[-1]
+        assert_required_inputs(components[model_name], components)
+    elif "oneOf" in content:
+        for variant in content["oneOf"]:
+            assert_required_inputs(variant, components)
+    elif "anyOf" in content:
+        for variant in content["anyOf"]:
+            assert_required_inputs(variant, components)
+    elif "properties" in content:
+        assert set(content.get("required", [])) == set(content["properties"])
 
 
 def test_agent_openapi_is_generated_filtered_and_credential_free(client):
@@ -41,6 +52,7 @@ def test_agent_openapi_is_generated_filtered_and_credential_free(client):
     assert {operation["operationId"] for operation in operations} == AGENT_OPERATION_IDS
     assert len(operations) == len(AGENT_OPERATION_IDS)
     assert "servers" not in schema
+    assert "/api/claims/{claim_id}/steps" not in schema["paths"]
     assert client.get("/openapi.json").json() == root_schema
     for operation in operations:
         assert operation["description"]

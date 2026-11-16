@@ -1,13 +1,20 @@
+import sqlite3
 from pathlib import Path
+from typing import cast
 
 import yaml
-from sqlalchemy import select
+from langchain_core.runnables import RunnableConfig
+from langgraph.checkpoint.base import CheckpointMetadata, empty_checkpoint
+from langgraph.checkpoint.sqlite import SqliteSaver
+from sqlalchemy import inspect, select, text
 
 from backend.database import (
     add_activity,
     connect,
     create_db_engine,
+    database_path,
     documents_table,
+    get_engine,
     initialize_database,
     load_json,
     plans_table,
@@ -50,7 +57,6 @@ def test_reseed_restores_the_queue_and_clears_all_work(client):
     assert {claim["status"] for claim in claims} == {"waiting"}
     assert bundle["decision"] is None
     assert bundle["activity"] == []
-    assert bundle["documents_read"] == []
     assert client.get("/api/dispatches/current").json() is None
 
 
@@ -118,6 +124,70 @@ def test_context_plans_add_ons_deductible_rules_and_documents_are_seeded(client)
         assert document["source"]["system"] == system
         assert document["source"]["owner"] == owner
         assert document["content"] == source_body
+
+
+def test_normal_initialization_preserves_retired_tables_without_migrating(client):
+    with connect() as connection:
+        connection.execute(
+            text(
+                "CREATE TABLE document_reads (id INTEGER PRIMARY KEY, "
+                "claim_id VARCHAR NOT NULL)"
+            )
+        )
+
+    initialize_database()
+
+    assert inspect(get_engine()).has_table("document_reads")
+
+
+def test_reseed_drops_the_two_retired_document_tables(client):
+    with connect() as connection:
+        for table_name in ("document_reads", "document_sections"):
+            connection.execute(
+                text(
+                    f"CREATE TABLE {table_name} "
+                    "(id INTEGER PRIMARY KEY, claim_id VARCHAR NOT NULL)"
+                )
+            )
+
+    reseed_database()
+
+    inspector = inspect(get_engine())
+    assert not inspector.has_table("document_reads")
+    assert not inspector.has_table("document_sections")
+
+
+def test_reseed_clears_langgraph_sqlite_checkpoints_and_restores_queue(
+    client, monkeypatch
+):
+    monkeypatch.delenv("DATABASE_URL", raising=False)
+    path = database_path()
+    connection = sqlite3.connect(path, check_same_thread=False)
+    checkpointer = SqliteSaver(connection)
+    checkpointer.setup()
+    thread_config = cast(
+        RunnableConfig,
+        {"configurable": {"thread_id": "reseed-checkpoint", "checkpoint_ns": ""}},
+    )
+    saved_config = checkpointer.put(
+        thread_config,
+        empty_checkpoint(),
+        cast(CheckpointMetadata, {"source": "input", "step": 0, "parents": {}}),
+        {},
+    )
+    assert checkpointer.get_tuple(saved_config) is not None
+    connection.close()
+
+    reseed_database()
+
+    connection = sqlite3.connect(path, check_same_thread=False)
+    checkpointer = SqliteSaver(connection)
+    checkpointer.setup()
+    assert checkpointer.get_tuple(saved_config) is None
+    connection.close()
+    claims = client.get("/api/claims").json()
+    assert len(claims) == 26
+    assert {claim["status"] for claim in claims} == {"waiting"}
 
 
 def test_postgres_engine_uses_schema_and_bounded_pool(monkeypatch):
