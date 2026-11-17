@@ -6,7 +6,8 @@ from bedrock_agentcore.identity.auth import requires_api_key
 from langchain_openai import ChatOpenAI
 
 OPENROUTER_BASE_URL = "https://openrouter.ai/api/v1"
-MODEL = "openai/gpt-6-luna"
+# MODEL = "openai/gpt-6-luna"
+MODEL = "openrouter/free"
 
 
 def secret(name: str) -> str:
